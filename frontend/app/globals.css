@@ -1,0 +1,102 @@
+@import "tailwindcss";
+
+/* Design tokens extracted from simplify.jobs' live computed styles rather than
+   eyeballed, so the palette matches the reference exactly.
+   Simplify uses Circular Std (proprietary); Figtree is the closest free
+   geometric-humanist substitute. */
+@theme {
+  --color-brand: #12a1c0;
+  --color-brand-dark: #0e8299;
+  --color-brand-tint: #f0fcff;
+  --color-brand-teal: #5eead4;
+
+  --color-ink: #263137;
+  --color-muted: #6b727f;
+  --color-line: #e5e9ec;
+  --color-page: #f8fafc;
+  --color-gold: #ffc700;
+
+  --font-sans: var(--font-figtree), ui-sans-serif, system-ui, sans-serif;
+
+  --radius-card: 16px;
+  --radius-panel: 20px;
+}
+
+html,
+body {
+  background: var(--color-page);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Simplify's cards lean on hairline borders and very soft shadows rather than
+   heavy elevation — the depth comes from spacing, not drop shadows. */
+@utility card {
+  background: #fff;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-card);
+}
+
+@utility btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: var(--color-brand);
+  color: #fff;
+  font-weight: 600;
+  border-radius: 9999px;
+  padding: 0.625rem 1.25rem;
+  transition: background 120ms ease;
+}
+@utility btn-primary-hover {
+  background: var(--color-brand-dark);
+}
+
+@utility btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background: #fff;
+  color: var(--color-ink);
+  font-weight: 600;
+  border: 1px solid var(--color-line);
+  border-radius: 9999px;
+  padding: 0.625rem 1.25rem;
+  transition: border-color 120ms ease;
+}
+
+@utility field {
+  width: 100%;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  background: #fff;
+  color: var(--color-ink);
+  outline: none;
+}
+@utility field-focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px rgb(18 161 192 / 0.12);
+}
+
+input.field:focus,
+textarea.field:focus,
+select.field:focus {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px rgb(18 161 192 / 0.12);
+}
+
+button.btn-primary:hover:not(:disabled) {
+  background: var(--color-brand-dark);
+}
+button.btn-primary:disabled,
+a.btn-primary[aria-disabled="true"] {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+button.btn-ghost:hover:not(:disabled) {
+  border-color: var(--color-brand);
+}

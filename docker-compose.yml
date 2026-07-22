@@ -1,0 +1,46 @@
+# SimplyApply — one command to run the whole thing:
+#
+#     docker compose up
+#
+# Then open http://localhost:3000
+#
+# The backend is intentionally invisible: only the frontend port is published, and the
+# browser reaches the API through Next's /api rewrite. You never launch or configure the
+# backend yourself.
+
+services:
+  backend:
+    build: ./backend
+    environment:
+      SIMPLYAPPLY_DATA_DIR: /data
+      # Optional pre-seeding — everything here is also settable in the Settings UI,
+      # which writes to the SQLite DB and takes precedence over these defaults.
+      SIMPLYAPPLY_LLM_PROVIDER: ${SIMPLYAPPLY_LLM_PROVIDER:-anthropic}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # host.docker.internal lets the container reach an Ollama running on the host.
+      SIMPLYAPPLY_OLLAMA_HOST: ${SIMPLYAPPLY_OLLAMA_HOST:-http://host.docker.internal:11434}
+    volumes:
+      # Named volume, not a bind mount: the resume DB and generated files survive
+      # `docker compose down` and rebuilds.
+      - simplyapply-data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+    # Not published to the host — the frontend talks to it over the compose network.
+    expose:
+      - "8000"
+
+  frontend:
+    build: ./frontend
+    environment:
+      BACKEND_URL: http://backend:8000
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  simplyapply-data:
