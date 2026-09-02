@@ -48,6 +48,17 @@ class SearchResponse(BaseModel):
     from_cache: bool = False
 
 
+class AdhocJobIn(BaseModel):
+    """A job page the extension scraped itself — not from a connector SimplyApply runs."""
+
+    company: str = Field(max_length=200)
+    title: str = Field(max_length=200)
+    description: str = Field(max_length=50_000)
+    apply_url: str = Field(max_length=200)
+    location: str = ""
+    remote: bool = False
+
+
 # ------------------------------------------------------------------------ resume
 
 
@@ -132,7 +143,7 @@ class ResumeOut(BaseModel):
 
 
 class GuardrailViolation(BaseModel):
-    kind: str  # employer | title | date | metric | skill
+    kind: str  # employer | title | date | metric | skill | contact
     value: str
     where: str
     detail: str
@@ -145,6 +156,14 @@ class TailorResult(BaseModel):
     violations: list[GuardrailViolation] = Field(default_factory=list)
     warning: str | None = None
     notes: list[str] = Field(default_factory=list)
+
+
+class CoverLetterResult(BaseModel):
+    body: str
+    changed: bool
+    fell_back: bool = False
+    violations: list[GuardrailViolation] = Field(default_factory=list)
+    warning: str | None = None
 
 
 class ApplyResponse(BaseModel):
@@ -193,3 +212,12 @@ class ApplicationOut(BaseModel):
     apply_url: str = ""
     docx_url: str | None = None
     pdf_url: str | None = None
+
+
+class ApplicationDetail(BaseModel):
+    """Everything the extension needs for a page it recognizes: what was sent, and how."""
+
+    application: ApplicationOut
+    resume: StructuredResume
+    cover_letter: str | None = None
+    cover_letter_fell_back: bool = False

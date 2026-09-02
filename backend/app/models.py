@@ -75,6 +75,23 @@ class Application(Base):
     resume: Mapped[Resume] = relationship("Resume")
 
 
+class CoverLetter(Base):
+    """New table, not a column on `applications` — SQLite here has no migration tooling
+    (`Base.metadata.create_all` only), so an existing table only ever gains new rows via a
+    new, additive table, never an ALTER.
+    """
+
+    __tablename__ = "cover_letters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"), index=True
+    )
+    body: Mapped[str] = mapped_column(Text)
+    fell_back: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
 class SearchCache(Base):
     """Records when a (source, query) pair was last fetched, so the TTL is per-source.
 

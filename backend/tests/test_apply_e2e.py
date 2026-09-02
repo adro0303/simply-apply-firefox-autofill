@@ -9,8 +9,6 @@ real one, including SQLite and python-docx.
 from __future__ import annotations
 
 import docx
-import pytest
-from fastapi.testclient import TestClient
 
 BASE_RESUME = {
     "basics": {"name": "Jane Doe", "email": "jane@example.com", "summary": "Engineer."},
@@ -66,28 +64,6 @@ class _Stub:
 
     async def health(self):
         return True, "stub"
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    """A fully isolated app instance with its own SQLite file and artifacts dir."""
-    monkeypatch.setenv("SIMPLYAPPLY_DATA_DIR", str(tmp_path / "data"))
-
-    # The engine, the settings cache, and the artifacts path are all module-level
-    # singletons bound at import time. Dropping every `app.*` module forces them to be
-    # rebuilt against this test's temp data dir, so tests can't leak state into each other.
-    import sys
-
-    for module in [m for m in list(sys.modules) if m == "app" or m.startswith("app.")]:
-        del sys.modules[module]
-
-    from app.db import init_db
-    from app.main import app as fresh_app
-
-    init_db()
-
-    with TestClient(fresh_app) as c:
-        yield c
 
 
 def _seed(client, monkeypatch, fabricate: bool = False) -> None:
@@ -252,3 +228,126 @@ def test_settings_never_returns_the_api_key(client) -> None:
     body = client.get("/api/settings").json()
     assert body["has_key"] is True
     assert "sk-secret" not in str(body)
+
+
+# ---------------------------------------------------------------- cover letters
+
+
+class _CoverLetterStub:
+    """Same "no module-level app.* imports" discipline as `_Stub`, for the same reason."""
+
+    name = "stub"
+
+    def __init__(self, fabricate: bool = False) -> None:
+        self.fabricate = fabricate
+
+    async def complete_structured(self, *, system, user, schema, max_tokens=16000):
+        body = (
+            "Dear Hiring Team, I bring hands-on Python experience from my time at Acme "
+            "Corp. Sincerely, Jane Doe"
+        )
+        if self.fabricate:
+            body = (
+                "Dear Hiring Team, I improved performance by 90% at Acme Corp. "
+                "Sincerely, Jane Doe"
+            )
+        return schema.model_validate({"body": body})
+
+    async def health(self):
+        return True, "stub"
+
+
+def test_cover_letter_requires_existing_application(client) -> None:
+    from app.db import SessionLocal
+    from app.models import Job
+
+    with SessionLocal() as db:
+        db.add(Job(id=JOB["id"], source="x", title="T", company="C", apply_url="u"))
+        db.commit()
+
+    res = client.post(f"/api/apply/{JOB['id']}/cover-letter")
+    assert res.status_code == 404
+
+
+def test_cover_letter_endpoint_returns_body(client, monkeypatch) -> None:
+    _seed(client, monkeypatch)
+    client.post(f"/api/apply/{JOB['id']}")
+
+    import app.routers.apply as apply_module
+
+    monkeypatch.setattr(apply_module, "build_provider", lambda db: _CoverLetterStub())
+
+    res = client.post(f"/api/apply/{JOB['id']}/cover-letter")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["body"]
+    assert body["fell_back"] is False
+
+
+def test_cover_letter_fabrication_falls_back(client, monkeypatch) -> None:
+    _seed(client, monkeypatch)
+    client.post(f"/api/apply/{JOB['id']}")
+
+    import app.routers.apply as apply_module
+
+    monkeypatch.setattr(
+        apply_module, "build_provider", lambda db: _CoverLetterStub(fabricate=True)
+    )
+
+    res = client.post(f"/api/apply/{JOB['id']}/cover-letter")
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["fell_back"] is True
+    assert body["warning"]
+    assert "90%" not in body["body"]
+
+
+# ---------------------------------------------------------------------- ad-hoc jobs
+
+
+def test_adhoc_job_is_idempotent(client) -> None:
+    payload = {
+        "company": "Initech",
+        "title": "Backend Engineer",
+        "description": "Build things.",
+        "apply_url": "https://boards.example.com/initech/backend",
+    }
+    first = client.post("/api/jobs/adhoc", json=payload)
+    assert first.status_code == 200, first.text
+    assert first.json()["id"].startswith("adhoc:")
+    assert first.json()["source"] == "adhoc"
+
+    second = client.post("/api/jobs/adhoc", json=payload)
+    assert second.status_code == 200
+    assert second.json()["id"] == first.json()["id"], "resubmitting must upsert, not duplicate"
+
+    rows = client.get("/api/applications").json()  # sanity: no crash from the extra row
+    assert isinstance(rows, list)
+
+
+# ------------------------------------------------------------------ applications by-url
+
+
+def test_applications_by_url_round_trip(client, monkeypatch) -> None:
+    _seed(client, monkeypatch)
+    client.post(f"/api/apply/{JOB['id']}")
+
+    import app.routers.apply as apply_module
+
+    monkeypatch.setattr(apply_module, "build_provider", lambda db: _CoverLetterStub())
+    client.post(f"/api/apply/{JOB['id']}/cover-letter")
+
+    # Query-string and fragment noise must not break the match.
+    res = client.get(
+        "/api/applications/by-url", params={"url": JOB["apply_url"] + "?utm=1#top"}
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["application"]["job_id"] == JOB["id"]
+    assert body["resume"]["basics"]["name"] == "Jane Doe"
+    assert body["cover_letter"]
+
+
+def test_applications_by_url_404_when_unknown(client) -> None:
+    res = client.get("/api/applications/by-url", params={"url": "https://example.com/nope"})
+    assert res.status_code == 404

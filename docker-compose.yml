@@ -20,6 +20,11 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # host.docker.internal lets the container reach an Ollama running on the host.
       SIMPLYAPPLY_OLLAMA_HOST: ${SIMPLYAPPLY_OLLAMA_HOST:-http://host.docker.internal:11434}
+      # Pinning this (same value on both services, via the one root .env) means the
+      # frontend's /api/* proxy authenticates immediately instead of the fresh-DB case,
+      # where the backend generates its own token and the frontend has to be told about
+      # it after the fact. See .env.example.
+      SIMPLYAPPLY_EXTENSION_TOKEN: ${SIMPLYAPPLY_EXTENSION_TOKEN:-}
     volumes:
       # Named volume, not a bind mount: the resume DB and generated files survive
       # `docker compose down` and rebuilds.
@@ -35,6 +40,7 @@ services:
     build: ./frontend
     environment:
       BACKEND_URL: http://backend:8000
+      SIMPLYAPPLY_EXTENSION_TOKEN: ${SIMPLYAPPLY_EXTENSION_TOKEN:-}
     ports:
       - "3000:3000"
     depends_on:

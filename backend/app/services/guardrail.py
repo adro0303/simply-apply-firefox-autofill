@@ -24,6 +24,13 @@ What we check, and why each one:
       present. A skill may be *promoted* from anywhere in the base resume (a bullet, a
       project description); it may not be introduced because the JD asked for it.
 
+  contact info (basics: name, email, phone, url, location, profiles)
+      There is no legitimate reason tailoring ever touches these — unlike the summary,
+      which is rewritten for the target role on purpose, a rewritten phone number or
+      email is either a model malfunction or a poisoned-JD prompt injection, and either
+      way the extension will type it into a live application form. Must match the base
+      resume value exactly (after normalization).
+
 Everything else — bullet order, section order, phrasing, the summary — is free. That is
 the whole point of tailoring, and none of it asserts a new verifiable fact.
 
@@ -37,8 +44,9 @@ from __future__ import annotations
 
 import re
 import unicodedata
+from itertools import zip_longest
 
-from app.schemas import GuardrailViolation, StructuredResume
+from app.schemas import Basics, GuardrailViolation, StructuredResume
 
 # Matches numbers with optional magnitude/unit suffixes: 40%, 1.2M, $500k, 3x, 12,000
 _NUMERIC = re.compile(r"\$?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmMbB]\b|[xX]\b)?")
@@ -82,6 +90,21 @@ def _strip_trailing_zeros(number: str) -> str:
     return number or "0"
 
 
+def _fold_phone(value: str) -> str:
+    """Digits only. `+34 675 931 520` and `+34675931520` are the same number; spacing,
+    parens, and dashes carry no meaning."""
+    return re.sub(r"\D", "", value or "")
+
+
+def _fold_url(value: str) -> str:
+    """Scheme/`www.`/trailing-slash agnostic — cosmetic URL formatting shouldn't trip
+    the guardrail, but a different domain or path must."""
+    value = (value or "").strip().lower()
+    value = re.sub(r"^[a-z][a-z0-9+.-]*://", "", value)
+    value = re.sub(r"^www\.", "", value)
+    return value.rstrip("/")
+
+
 def _all_text(resume: StructuredResume) -> str:
     """Every free-text field, concatenated — the corpus a skill may be promoted from."""
     parts: list[str] = [
@@ -89,8 +112,14 @@ def _all_text(resume: StructuredResume) -> str:
         resume.basics.label,
         resume.basics.summary,
         resume.basics.email,
+        resume.basics.phone,
         resume.basics.url,
+        resume.basics.location.city,
+        resume.basics.location.region,
+        resume.basics.location.countryCode,
     ]
+    for profile in resume.basics.profiles:
+        parts += [profile.network, profile.username, profile.url]
     for job in resume.work:
         parts += [job.name, job.position, job.location, job.summary, *job.highlights]
     for edu in resume.education:
@@ -139,6 +168,42 @@ class BaseFacts:
         return bool(folded) and folded in self.corpus
 
 
+_CONTACT_FIELDS = ("name", "email", "phone", "url")
+_LOCATION_FIELDS = ("city", "region", "countryCode")
+
+
+def _contact_diff(base: Basics, tailored: Basics) -> list[tuple[str, str, str]]:
+    """(field path, base value, tailored value) for every contact field that changed.
+
+    Each field uses the normalization appropriate to it, so a cosmetic rewrite (phone
+    spacing, a trailing slash on a URL, accent folding on a name) doesn't false-positive
+    — but a substituted value, however cosmetic-looking, still differs after folding.
+    """
+    changed: list[tuple[str, str, str]] = []
+
+    for field in _CONTACT_FIELDS:
+        base_value = getattr(base, field)
+        tailored_value = getattr(tailored, field)
+        norm = _fold_url if field == "url" else (_fold_phone if field == "phone" else _key)
+        if norm(base_value) != norm(tailored_value):
+            changed.append((field, base_value, tailored_value))
+
+    for field in _LOCATION_FIELDS:
+        base_value = getattr(base.location, field)
+        tailored_value = getattr(tailored.location, field)
+        if _key(base_value) != _key(tailored_value):
+            changed.append((f"location.{field}", base_value, tailored_value))
+
+    for i, (bp, tp) in enumerate(zip_longest(base.profiles, tailored.profiles)):
+        for field, norm in (("network", _key), ("username", _key), ("url", _fold_url)):
+            base_value = getattr(bp, field) if bp else ""
+            tailored_value = getattr(tp, field) if tp else ""
+            if norm(base_value) != norm(tailored_value):
+                changed.append((f"profiles[{i}].{field}", base_value, tailored_value))
+
+    return changed
+
+
 def check(base: StructuredResume, tailored: StructuredResume) -> list[GuardrailViolation]:
     """Return every fact in `tailored` that isn't supported by `base`. Empty = clean."""
     facts = BaseFacts(base)
@@ -147,6 +212,20 @@ def check(base: StructuredResume, tailored: StructuredResume) -> list[GuardrailV
     def flag(kind: str, value: str, where: str, detail: str) -> None:
         violations.append(
             GuardrailViolation(kind=kind, value=value, where=where, detail=detail)
+        )
+
+    # --- contact info ------------------------------------------------------
+    # Tailoring has no legitimate reason to touch any of this — unlike the summary, which
+    # is meant to change, a rewritten email/phone/url/name/location/profile is either a
+    # model malfunction or a prompt-injected job description, and it ends up typed into a
+    # live application form. Checked first so it can never be masked by other violations.
+    for field, base_value, tailored_value in _contact_diff(base.basics, tailored.basics):
+        flag(
+            "contact",
+            tailored_value,
+            f"basics.{field}",
+            f"basics.{field} does not match the base resume ({base_value!r} -> "
+            f"{tailored_value!r}). Tailoring must never change contact information.",
         )
 
     # --- experience ------------------------------------------------------
@@ -211,6 +290,34 @@ def check(base: StructuredResume, tailored: StructuredResume) -> list[GuardrailV
             "Figure does not appear in the base resume — possible inflated or invented metric.",
         )
 
+    return violations
+
+
+def check_text(base: StructuredResume, text: str) -> list[GuardrailViolation]:
+    """Numeric-fabrication check for free prose (cover letters, not a StructuredResume).
+
+    A cover letter has no employer/title/date/skill fields to whitelist against — it's a
+    paragraph. The one check that generalizes cleanly to prose is the same one `check()`
+    runs last: every numeric token in the output must trace back to the base resume.
+
+    # ponytail: free-text guardrail only catches fabricated numbers, not false
+    # employer/date claims embedded in prose — add NER-based entity check if this proves
+    # insufficient in practice.
+    """
+    facts = BaseFacts(base)
+    violations: list[GuardrailViolation] = []
+    for number in sorted(_numbers_in(text) - facts.numbers):
+        violations.append(
+            GuardrailViolation(
+                kind="metric",
+                value=number,
+                where="document",
+                detail=(
+                    "Figure does not appear in the base resume — possible inflated or "
+                    "invented metric."
+                ),
+            )
+        )
     return violations
 
 
