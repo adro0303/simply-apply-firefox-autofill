@@ -17,16 +17,20 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.db import get_db
+from app.deps import require_extension_token
 from app.llm.base import LLMError
 from app.llm.registry import build_provider
-from app.models import Application, Job, Resume
-from app.schemas import ApplyResponse, JobRecord, StructuredResume
+from app.models import Application, CoverLetter, Job, Resume
+from app.schemas import ApplyResponse, CoverLetterResult, JobRecord, StructuredResume
+from app.services import cover_letter
 from app.services.render_docx import render_docx
 from app.services.render_pdf import PDFRenderError, render_pdf
 from app.services.tailor import tailor
 
 log = logging.getLogger(__name__)
-router = APIRouter(prefix="/api", tags=["apply"])
+# Every route in this file (tailor, cover-letter, download) is one the extension calls
+# directly on a job page — gated behind the shared extension token. See app/deps.py.
+router = APIRouter(prefix="/api", tags=["apply"], dependencies=[Depends(require_extension_token)])
 
 _UNSAFE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -51,6 +55,52 @@ def _job_record(row: Job) -> JobRecord:
         apply_url=row.apply_url,
         description=row.description,
     )
+
+
+@router.post("/apply/{job_id:path}/cover-letter", response_model=CoverLetterResult)
+async def apply_cover_letter(job_id: str, db: Session = Depends(get_db)) -> CoverLetterResult:
+    """Cover letter for a job that's already been through /apply — reuses the tailored
+    resume that was actually rendered, not the base one, so the letter and the resume
+    tell the same story.
+
+    Registered before /apply/{job_id:path} in this file: both routes use the greedy
+    `path` converter, so the more specific route must be tried first or the plain apply()
+    route would swallow this URL (job_id would just absorb "/cover-letter").
+    """
+    application = (
+        db.query(Application)
+        .filter(Application.job_id == job_id)
+        .order_by(Application.applied_at.desc())
+        .first()
+    )
+    if application is None:
+        raise HTTPException(
+            404,
+            "No application for this job yet. Run POST /api/apply/{job_id} first.",
+        )
+
+    resume_row = db.get(Resume, application.resume_id)
+    job_row = db.get(Job, job_id)
+    if resume_row is None or job_row is None:
+        raise HTTPException(404, "The application's resume or job record is missing.")
+
+    resume = StructuredResume.model_validate_json(resume_row.structured_json)
+    job = _job_record(job_row)
+
+    try:
+        provider = build_provider(db)
+        result = await cover_letter.generate(provider, resume, job)
+    except LLMError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    db.add(
+        CoverLetter(
+            application_id=application.id, body=result.body, fell_back=result.fell_back
+        )
+    )
+    db.commit()
+
+    return result
 
 
 @router.post("/apply/{job_id:path}", response_model=ApplyResponse)

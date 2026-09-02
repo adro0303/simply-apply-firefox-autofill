@@ -40,11 +40,22 @@ def _set_sqlite_pragmas(dbapi_connection, _connection_record) -> None:
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 
 
-def init_db() -> None:
-    """Create tables. Import models first so they register on Base.metadata."""
+def init_db() -> str:
+    """Create tables and ensure the extension auth token exists.
+
+    Returns the token so the caller (main.py's lifespan) can log it once at startup —
+    this is the only place it's ever surfaced in plaintext outside the DB.
+    """
     from app import models  # noqa: F401
+    from app.services import settings_store
 
     Base.metadata.create_all(bind=engine)
+
+    db = SessionLocal()
+    try:
+        return settings_store.extension_token(db)
+    finally:
+        db.close()
 
 
 def get_db() -> Iterator[Session]:

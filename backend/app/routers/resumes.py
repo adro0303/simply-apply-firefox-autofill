@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
+from app.deps import require_extension_token
 from app.llm.base import LLMError
 from app.llm.registry import build_provider
 from app.models import Resume
@@ -93,7 +94,11 @@ def create_resume(payload: ResumeIn, db: Session = Depends(get_db)) -> ResumeOut
     return _to_out(row)
 
 
-@router.get("/base", response_model=ResumeOut | None)
+@router.get(
+    "/base",
+    response_model=ResumeOut | None,
+    dependencies=[Depends(require_extension_token)],
+)
 def get_base(db: Session = Depends(get_db)) -> ResumeOut | None:
     row = db.execute(
         select(Resume).where(Resume.is_base.is_(True)).order_by(Resume.created_at.desc())

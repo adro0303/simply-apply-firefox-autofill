@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 
 from sqlalchemy.orm import Session
 
@@ -25,6 +26,7 @@ KEY_OLLAMA_HOST = "ollama_host"
 KEY_OPENAI_BASE_URL = "openai_base_url"
 KEY_ENABLED_SOURCES = "enabled_sources"
 KEY_GREENHOUSE_COMPANIES = "greenhouse_companies"
+KEY_EXTENSION_TOKEN = "extension_token"
 
 # Sensible starter set of Greenhouse boards. Greenhouse has no global search endpoint —
 # it is per-company by design — so a company list is required input, not a limitation
@@ -110,3 +112,20 @@ def openai_base_url(db: Session) -> str:
 
 def greenhouse_companies(db: Session) -> list[str]:
     return get_list(db, KEY_GREENHOUSE_COMPANIES, DEFAULT_GREENHOUSE_COMPANIES)
+
+
+def extension_token(db: Session) -> str:
+    """The shared secret that gates every endpoint a browser extension calls.
+
+    CORS's `allow_origin_regex` authorizes any `moz-/chrome-extension://` origin, not
+    just ours — it can't do better, since CORS is enforced per-origin by the browser, not
+    per-extension-identity. This token is the actual access control.
+
+    Generated once (env value if pinned, otherwise random) and persisted, so it survives
+    restarts and is stable across the whole DB's lifetime.
+    """
+    token = get(db, KEY_EXTENSION_TOKEN, get_settings().extension_token)
+    if not token:
+        token = secrets.token_urlsafe(32)
+        set_value(db, KEY_EXTENSION_TOKEN, token)
+    return token

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.schemas import Basics, Education, Project, Skill, StructuredResume, Work
+from app.schemas import Basics, Education, Location, Profile, Project, Skill, StructuredResume, Work
 from app.services import guardrail
 
 
@@ -20,7 +20,11 @@ def base() -> StructuredResume:
         basics=Basics(
             name="Jane Doe",
             email="jane@example.com",
+            phone="+34 675 931 520",
+            url="https://janedoe.dev",
             summary="Backend engineer focused on Python services.",
+            location=Location(city="Berlin", region="Berlin", countryCode="DE"),
+            profiles=[Profile(network="GitHub", username="janedoe", url="https://github.com/janedoe")],
         ),
         work=[
             Work(
@@ -80,6 +84,14 @@ def test_accent_and_case_differences_pass(base: StructuredResume) -> None:
     assert guardrail.check(base, tailored) == []
 
 
+def test_untouched_basics_pass(base: StructuredResume) -> None:
+    """Reordering/rephrasing elsewhere, with basics left alone, must not flag contact info."""
+    tailored = base.model_copy(deep=True)
+    tailored.basics.summary = "Backend engineer, Python and distributed systems."
+    tailored.work[0].highlights = list(reversed(tailored.work[0].highlights))
+    assert "contact" not in _kinds(guardrail.check(base, tailored))
+
+
 def test_dropping_an_entry_passes(base: StructuredResume) -> None:
     tailored = base.model_copy(deep=True)
     tailored.projects = []
@@ -134,6 +146,53 @@ def test_bare_skill_with_no_keywords_is_still_checked(base: StructuredResume) ->
     tailored = base.model_copy(deep=True)
     tailored.skills.append(Skill(name="Kubernetes"))
     assert "skill" in _kinds(guardrail.check(base, tailored))
+
+
+def test_swapped_email_is_caught(base: StructuredResume) -> None:
+    """The exploit: a poisoned JD makes the model rewrite contact info."""
+    tailored = base.model_copy(deep=True)
+    tailored.basics.email = "attacker@evil.example"
+    violations = guardrail.check(base, tailored)
+    assert "contact" in _kinds(violations)
+    assert any(v.where == "basics.email" for v in violations)
+
+
+def test_swapped_phone_url_name_location_and_profile_are_all_caught(
+    base: StructuredResume,
+) -> None:
+    tailored = base.model_copy(deep=True)
+    tailored.basics.name = "John Attacker"
+    tailored.basics.phone = "+1 555 000 0000"
+    tailored.basics.url = "https://evil.example"
+    tailored.basics.location.city = "Nowhere"
+    tailored.basics.profiles[0].url = "https://github.com/attacker"
+    wheres = {v.where for v in guardrail.check(base, tailored)}
+    assert {
+        "basics.name",
+        "basics.phone",
+        "basics.url",
+        "basics.location.city",
+        "basics.profiles[0].url",
+    } <= wheres
+
+
+def test_added_profile_is_caught(base: StructuredResume) -> None:
+    tailored = base.model_copy(deep=True)
+    tailored.basics.profiles.append(
+        Profile(network="Twitter", username="attacker", url="https://twitter.com/attacker")
+    )
+    violations = guardrail.check(base, tailored)
+    assert any(v.where.startswith("basics.profiles[1]") for v in violations)
+
+
+def test_cosmetic_phone_and_url_formatting_does_not_false_positive(
+    base: StructuredResume,
+) -> None:
+    """`+34 675 931 520` vs `+34675931520`, and a trailing slash, are formatting only."""
+    tailored = base.model_copy(deep=True)
+    tailored.basics.phone = "+34675931520"
+    tailored.basics.url = "https://janedoe.dev/"
+    assert "contact" not in _kinds(guardrail.check(base, tailored))
 
 
 def test_regrouping_skills_under_new_labels_passes(base: StructuredResume) -> None:
@@ -194,3 +253,32 @@ def test_summarize_lists_violations(base: StructuredResume) -> None:
     tailored.work[0].position = "VP of Engineering"
     text = guardrail.summarize(guardrail.check(base, tailored))
     assert "VP of Engineering" in text
+
+
+# --- check_text (free-prose cover letters) ------------------------------------
+
+
+def test_check_text_clean_prose_passes(base: StructuredResume) -> None:
+    text = (
+        "I built a Redis cache layer at Acme Corp that cut p95 latency by 15%, and "
+        "migrated 12 services from Flask to FastAPI."
+    )
+    assert guardrail.check_text(base, text) == []
+
+
+def test_check_text_catches_fabricated_metric(base: StructuredResume) -> None:
+    text = "I improved performance by 60% at Acme Corp."
+    violations = guardrail.check_text(base, text)
+    assert _kinds(violations) == {"metric"}
+    assert any(v.value == "60%" for v in violations)
+
+
+def test_check_text_ignores_small_incidental_numbers(base: StructuredResume) -> None:
+    text = "I led a team of 3 engineers."
+    assert guardrail.check_text(base, text) == []
+
+
+def test_check_text_does_not_flag_false_employer_claims(base: StructuredResume) -> None:
+    """Documents the known gap: check_text only catches numbers, not prose claims."""
+    text = "I spent five years at Google leading the search infrastructure team."
+    assert guardrail.check_text(base, text) == []

@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "qwen2.5:7b"
 
+    # Seed value for the extension auth token (see app.services.settings_store). Only
+    # meant for a deployment that wants to pin the same token across a fresh DB and a
+    # frontend container without a copy-paste step (e.g. Compose, both services reading
+    # the same env var). If unset, one is generated randomly on first startup instead.
+    extension_token: str = ""
+
     @property
     def db_path(self) -> Path:
         return self.data_dir / "simplyapply.db"

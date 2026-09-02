@@ -1,0 +1,47 @@
+{
+  "manifest_version": 3,
+  "name": "SimplyApply Autofill",
+  "version": "0.1.0",
+  "description": "Fills personal-info fields and drops a tailored cover letter on Greenhouse/Lever/Workday application pages, using a locally-run SimplyApply backend. Never submits the form.",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "simplyapply-autofill@local"
+    }
+  },
+  "permissions": ["activeTab", "storage"],
+  "host_permissions": [
+    "http://localhost:8000/*",
+    "*://boards.greenhouse.io/*",
+    "*://job-boards.greenhouse.io/*",
+    "*://jobs.lever.co/*",
+    "*://*.myworkdayjobs.com/*"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "options_ui": {
+    "page": "options/options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "SimplyApply Autofill"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://boards.greenhouse.io/*", "*://job-boards.greenhouse.io/*"],
+      "js": ["content/common.js", "content/greenhouse.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://jobs.lever.co/*"],
+      "js": ["content/common.js", "content/lever.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.myworkdayjobs.com/*"],
+      "js": ["content/common.js", "content/workday.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

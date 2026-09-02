@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>SimplyApply Autofill</title>
+<style>
+  body {
+    width: 320px;
+    font: 14px/1.4 -apple-system, system-ui, sans-serif;
+    color: #1a1a1a;
+    padding: 12px;
+  }
+  h1 {
+    font-size: 15px;
+    margin: 0 0 8px;
+  }
+  p.hint {
+    color: #555;
+    margin: 0 0 12px;
+  }
+  label {
+    display: block;
+    font-weight: 600;
+    margin: 8px 0 2px;
+  }
+  input[type="text"],
+  textarea {
+    width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+    padding: 4px 6px;
+    border: 1px solid #999;
+    border-radius: 4px;
+  }
+  textarea {
+    min-height: 100px;
+    resize: vertical;
+  }
+  button {
+    margin-top: 12px;
+    width: 100%;
+    padding: 8px;
+    font: inherit;
+    font-weight: 600;
+    border: 1px solid #1a1a1a;
+    border-radius: 4px;
+    background: #1a1a1a;
+    color: #fff;
+    cursor: pointer;
+  }
+  button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  button:focus-visible,
+  input:focus-visible,
+  textarea:focus-visible {
+    outline: 2px solid #1e6fd9;
+    outline-offset: 1px;
+  }
+  .warning {
+    background: #fff4e5;
+    border: 1px solid #ff7a00;
+    color: #6b3d00;
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-top: 10px;
+    font-size: 13px;
+  }
+  .error {
+    background: #fdecea;
+    border: 1px solid #d93025;
+    color: #7a1a12;
+    padding: 6px 8px;
+    border-radius: 4px;
+    margin-top: 10px;
+    font-size: 13px;
+  }
+  .status {
+    margin-top: 10px;
+    font-size: 13px;
+  }
+  .hidden {
+    display: none;
+  }
+</style>
+</head>
+<body>
+  <h1>SimplyApply Autofill</h1>
+
+  <div id="loading">Checking this page…</div>
+
+  <div id="found-view" class="hidden">
+    <p id="job-summary"></p>
+    <p class="hint">Resume file: <code id="resume-filename"></code> — attach it manually, browsers block scripted file uploads.</p>
+    <div id="found-warnings"></div>
+    <button id="fill-btn" type="button">Fill this page</button>
+    <div id="fill-status" class="status" role="status" aria-live="polite"></div>
+  </div>
+
+  <div id="adhoc-view" class="hidden">
+    <p class="hint">No prepared application found for this page. Generate one now.</p>
+    <form id="adhoc-form">
+      <label for="company">Company</label>
+      <input type="text" id="company" name="company" required />
+
+      <label for="title">Job title</label>
+      <input type="text" id="title" name="title" required />
+
+      <label for="description">Job description</label>
+      <textarea id="description" name="description" placeholder="Paste the job posting text here"></textarea>
+
+      <button type="submit" id="adhoc-submit">Generate &amp; fill</button>
+    </form>
+    <div id="adhoc-status" class="status" role="status" aria-live="polite"></div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

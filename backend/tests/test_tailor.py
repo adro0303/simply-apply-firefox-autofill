@@ -103,6 +103,24 @@ async def test_violation_triggers_retry_with_feedback(base, job) -> None:
     assert "violation" in provider.calls[1].lower()
 
 
+def _contact_swapped(base: StructuredResume) -> StructuredResume:
+    out = base.model_copy(deep=True)
+    out.basics.email = "attacker@evil.example"
+    return out
+
+
+async def test_swapped_contact_info_triggers_retry_and_falls_back(base, job) -> None:
+    """HIGH-1 exploit path: a poisoned JD rewrites basics.email. Must retry, then fail
+    closed to the base resume rather than ship the swapped contact info."""
+    provider = StubProvider([_contact_swapped(base), _contact_swapped(base)])
+    result = await tailor(provider, base, job)
+
+    assert result.fell_back is True
+    assert result.changed is False
+    assert result.resume.basics.email == base.basics.email
+    assert any(v.kind == "contact" for v in result.violations)
+
+
 async def test_persistent_violation_falls_back_to_base(base, job) -> None:
     """The critical path: two bad attempts must ship the user's own resume, not the fake."""
     provider = StubProvider([_fabricated(base), _fabricated(base)])
