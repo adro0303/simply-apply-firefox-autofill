@@ -1,162 +1,127 @@
-# SimplyApply Autofill (Firefox extension)
+<div align="center">
 
-Fills the personal-info fields and drops a tailored cover letter into
-Greenhouse/Lever/Workday application pages, using data your local SimplyApply
-backend already generated. **It never clicks Submit** — you still review and
-submit the form yourself, same as SimplyApply's own downloaded-docx flow.
+# 🦊 SimplyApply Autofill
 
-## Requirements
+### Fills real Greenhouse/Lever/Workday application forms using a local LLM — no subscription, no cloud API
 
-- The SimplyApply backend running locally at `http://localhost:8000` (see
-  `../backend/README.md`). Nothing in this extension talks to any other host.
-- Firefox.
+🌍 **Language:** English · [Español](README.es.md)
 
-## One-time setup: extension token
+![Firefox](https://img.shields.io/badge/Firefox-FF7139.svg?style=for-the-badge&logo=firefoxbrowser&logoColor=white)
+![Manifest V3](https://img.shields.io/badge/Manifest-V3-000000.svg?style=for-the-badge)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E.svg?style=for-the-badge&logo=javascript&logoColor=black)
+![Ollama](https://img.shields.io/badge/Local_LLM-Ollama-000000.svg?style=for-the-badge&logo=ollama&logoColor=white)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL--3.0-3DA639.svg?style=for-the-badge)](../LICENSE)
 
-The backend requires every request to carry an `X-SimplyApply-Token` header —
-this is what lets it tell "this extension" apart from any other extension
-installed in your browser. On startup, the backend prints the token once to
-its terminal/log output. Copy it from there, then:
+</div>
 
-1. Open the extension's Options page (right-click the extension icon →
-   **Manage Extension** → **Preferences**, or `about:addons`).
-2. Paste the token into the field and click **Save**.
+---
 
-If you skip this, requests come back `401 Unauthorized` and the popup will
-tell you to set up the token in Options.
+## Why this exists
 
-## Install (temporary add-on, for development)
+Every autofill extension worth using either charges a monthly subscription or burns your
+API tokens on a cloud model, one application at a time. Neither is necessary: your own
+machine can already run an LLM good enough to fill a form and write a cover letter, and
+[SimplyApply](https://github.com/artbyjazi/simply-apply) already has the one piece that
+actually matters — a **guardrail that mechanically rejects fabricated facts**, so a small
+local model's mistakes fail closed instead of quietly ending up on a real application.
 
-1. Open `about:debugging#/runtime/this-firefox`.
-2. Click **Load Temporary Add-on…**.
-3. Select `manifest.json` in this directory.
-4. The extension reloads each time Firefox restarts — repeat this step, or
-   package it properly if you want a persistent install.
+This extension is the last mile: it takes what SimplyApply already generates and types it
+into the actual page, on Greenhouse, Lever, or Workday, wherever a job portal redirected
+you. **It never clicks Submit** — you review and send the form yourself.
 
-## Use
+---
 
-1. Make sure the backend is running.
-2. Open a job application page on Greenhouse, Lever, or Workday.
-3. Click the extension icon.
-   - If SimplyApply already has a prepared application for this exact page
-     URL, you'll see the job title/company and a **Fill this page** button.
-   - Otherwise you get a small form (company, title, paste the job
-     description) — submitting it creates the job, tailors your resume, and
-     writes a cover letter against your local model, then shows the same
-     **Fill this page** button.
-4. Click **Fill this page**. Personal-info fields and (where a suitable field
-   exists) the cover letter get filled in. Review everything yourself, then
-   submit the form manually.
+## How it works
 
-Any guardrail warning from the backend (fell back to a generic resume/letter
-instead of a tailored one) is shown plainly in the popup — it is never
-hidden.
+```mermaid
+flowchart LR
+    A["👤 You open a job page\nGreenhouse / Lever / Workday"] --> B["🧩 Extension popup\nlooks up this URL"]
+    B -->|known job| C["📄 Already tailored\nresume + cover letter"]
+    B -->|unknown job| D["📝 Paste job description"]
+    D --> E["🧠 Local LLM (Ollama)\ntailor + guardrail"]
+    E --> C
+    C --> F["✍️ Content script\nfills the live form"]
+    F --> G["🙋 You review & click Submit"]
+
+    style A fill:#1a1f29,stroke:#30363d,color:#c9d1d9
+    style B fill:#1a1f29,stroke:#30363d,color:#c9d1d9
+    style C fill:#161b22,stroke:#3fb950,color:#3fb950
+    style D fill:#1a1f29,stroke:#30363d,color:#c9d1d9
+    style E fill:#161b22,stroke:#f85149,color:#f85149
+    style F fill:#161b22,stroke:#58a6ff,color:#58a6ff
+    style G fill:#1a1f29,stroke:#30363d,color:#c9d1d9
+```
+
+- **`background.js`** — the only file that talks to the backend (`fetch()`). Content
+  scripts and the popup route every backend call through it via
+  `browser.runtime.sendMessage`.
+- **`content/common.js`** — `setNativeValue()` (works around React/Ember swallowing a
+  plain `.value =` assignment), a `fillFields()` helper that tries a list of candidate
+  selectors per field, and a file-input highlighter.
+- **`content/greenhouse.js` / `lever.js` / `workday.js`** — one field-selector map per
+  platform, each exposing `window.SimplyApplyATS = { name, fill(data) }`. The manifest
+  loads `common.js` before the matching ATS file per site, so there's no runtime hostname
+  sniffing.
+- **`popup/`** — looks up the current page, shows the "ready to fill" view or the ad-hoc
+  job form, and sends the fill message to the active tab. No framework, no build step.
+- **`options/`** — one field for the backend auth token, saved to `browser.storage.local`.
+
+---
+
+## Try it
+
+1. **Backend running?** `curl localhost:8000/api/health` → `{"status":"ok",...}`. If not,
+   start it per the [root README](../README.md).
+2. **Load the extension.** Firefox → `about:debugging#/runtime/this-firefox` → **Load
+   Temporary Add-on…** → select `manifest.json` in this folder. No red error text = good.
+   It's temporary — reload it here again after restarting Firefox.
+3. **Set the token, once.** Click the extension icon (under the puzzle-piece icon 🧩 if
+   not pinned) → right-click → **Manage Extension** → **Preferences**. Paste the token the
+   backend printed at startup, save. Skip this and every request comes back `401` — the
+   popup will tell you to do this step.
+4. **Find a real posting.** Open `http://localhost:3000`, search, open a listing whose
+   Apply link is Greenhouse-hosted (`boards.greenhouse.io/...` or
+   `job-boards.greenhouse.io/...`) — start there, its markup is the most standard of the
+   three ATSes this supports.
+5. **Fill it.** On the application page, click the extension icon. Known job → **Fill this
+   page** button appears directly. Unknown job → paste company/title/description first
+   (calls your local model, can take a minute+), then the button appears. Click it, review
+   everything, submit manually.
+6. **Repeat on Lever (`jobs.lever.co`) and Workday (`*.myworkdayjobs.com`)** if you're
+   feeling patient — Workday only attempts the first "Personal Information" page.
+
+Whatever breaks is almost always a selector mismatch. Open dev tools (`F12`) on the field
+that didn't fill, compare its real `id`/`name`/`data-*` attributes against the candidates
+in the matching `content/<ats>.js` file, and fix it there.
+
+Any guardrail warning from the backend (fell back to a generic resume/letter instead of a
+tailored one) is shown plainly in the popup — never hidden.
+
+---
 
 ## Known limitations
 
-- **File upload is not automated.** Browsers block scripts from assigning a
-  file to `<input type="file">`, and this extension does not attempt a
-  DataTransfer/drag-simulation workaround (those are unreliable and easily
-  break). Instead, any file input found on the page is outlined and tagged
-  with a tooltip, and the popup shows the resume's actual filename (from the
-  backend's `docx_url`) so you know what to attach from your Downloads
-  folder.
-- **Selectors are best-effort, not verified against a live posting.** This
-  extension was built without browser access to a real Greenhouse/Lever/
-  Workday posting. Every `content/*.js` file starts with a
-  `SELECTORS UNVERIFIED` comment. Each field tries several candidate CSS
-  selectors covering known conventions for that platform, but they have not
-  been confirmed to work end-to-end. Test against a real posting before
-  relying on this for an actual application, and expect to need selector
-  tweaks — especially for Greenhouse (legacy `boards.greenhouse.io` embed vs.
-  newer `job-boards.greenhouse.io` React app use different markup).
-- **Workday coverage is deliberately partial.** Workday is a heavily
-  customized per-tenant SPA — field naming, page order, and
-  `data-automation-id` values vary by employer, and applications are a
-  multi-page wizard. This extension only attempts the first "Personal
-  Information" page. It does **not** attempt the later Experience/Education
-  wizard pages, which use dynamic "add another" list UIs that would need
-  per-tenant guesses to fill reliably. Fill those pages by hand.
-- **Cover letter field detection is best-effort per ATS.** Greenhouse and
-  Lever each have at most one plausible free-text field guessed (Greenhouse:
-  a "cover letter" textarea when the posting allows pasting one in; Lever: the
-  "Additional Information" `comments` field, since Lever has no dedicated
-  cover-letter field on most postings). Workday's Personal Information page
-  has no such field at all — the cover letter is reported as "not found" for
-  Workday and you'll need to attach or paste it wherever the later pages of
-  that tenant's flow expect it.
-
-## Step-by-step first test (no prior extension experience assumed)
-
-1. **Load it.** Open Firefox, go to `about:debugging#/runtime/this-firefox`, click
-   **Load Temporary Add-on…**, and select `manifest.json` in this directory. It should
-   appear in the list with no red error text. It's temporary — reload it here again after
-   restarting Firefox.
-2. **Set the token.** Click the extension's icon (find it under the puzzle-piece icon in
-   the toolbar if it's not pinned) → right-click → **Manage Extension** → **Preferences**.
-   Paste the token the backend printed at startup and save. Without this every request
-   comes back 401 and the popup tells you to do this step.
-3. **Make sure the backend is running**: `curl localhost:8000/api/health` should return
-   `{"status":"ok",...}`. Start it per the root README if not.
-4. **Find a real posting.** Open `http://localhost:3000` (the SimplyApply frontend),
-   search for something, and open a listing whose Apply link is a Greenhouse-hosted page
-   (`boards.greenhouse.io/...` or `job-boards.greenhouse.io/...`) — start there, its field
-   markup is the most standard of the three ATSes this supports.
-5. **Fill it.** On the application page, click the extension icon. If SimplyApply already
-   prepared this job you'll see a **Fill this page** button directly; otherwise paste the
-   job's company/title/description into the small form first (this calls your local model
-   — can take a minute or more) and the button appears once that's done. Click it.
-6. **Check what happened.** Which fields filled correctly, which didn't, any error text in
-   the popup. Repeat on a Lever (`jobs.lever.co`) and, if you're feeling patient, a Workday
-   (`*.myworkdayjobs.com`) posting — Workday only attempts the first "Personal Information"
-   page, see Known limitations above.
-
-Whatever breaks, the fix is almost always a selector tweak in the matching
-`content/<ats>.js` file — open dev tools (`F12`) on the application page, inspect the
-field that didn't fill, and compare its actual `id`/`name`/`data-*` attributes against the
-candidates listed in that file.
+| | Limitation | What it means |
+|---|---|---|
+| 📎 | **File upload isn't automated** | Browsers block scripts from assigning a file to `<input type="file">`. The extension outlines the field and shows the resume's filename instead — you attach it from Downloads yourself. |
+| 🎯 | **Selectors are unverified against a live posting** | Built without browser access to a real Greenhouse/Lever/Workday page. Every `content/*.js` file starts with a `SELECTORS UNVERIFIED` comment — expect to tweak them, especially for Greenhouse (legacy `boards.greenhouse.io` embed vs. newer `job-boards.greenhouse.io` React app use different markup). |
+| 🧩 | **Workday coverage is partial, on purpose** | Workday is a heavily customized per-tenant SPA — field names, page order, and `data-automation-id` values vary per employer, across a multi-page wizard. Only the first "Personal Information" page is attempted; later Experience/Education pages (dynamic "add another" lists) are filled by hand. |
+| ✉️ | **Cover-letter field detection is best-effort** | Greenhouse: a "cover letter" textarea when the posting offers one. Lever: the "Additional Information" `comments` field, since most Lever postings have no dedicated cover-letter field. Workday's Personal Information page has none at all — paste it wherever that tenant's later pages expect it. |
 
 ## Security
 
-An AGPL derivative doesn't get a pass on saying what changed for safety — two things this
-fork does differently from a "just wire it up" version, both because a security review of
-this exact extension work found them:
+Two fixes came out of a security review of this exact extension work — not theoretical
+findings, both verified by running the actual code:
 
-- **The `basics` block (name/email/phone/URLs/profiles) is now covered by the
-  no-fabrication guardrail**, same as work/education/skills always were. Before this fix,
-  a job description could make the tailoring model silently swap in a different email or
-  LinkedIn URL and nothing would flag it — the resume that got typed into the real
-  application form would carry it. Fixed in `backend/app/services/guardrail.py`.
-- **Every endpoint this extension calls requires an `X-SimplyApply-Token` header.**
-  CORS alone can't tell "this extension" apart from any other extension installed in your
-  browser — a completely unrelated extension with zero declared permissions on this API
-  could otherwise read your resume, or worse, rewrite `PUT /api/settings` to redirect all
-  future LLM calls (and a stored API key, if you use a paid provider) to an attacker's
-  server, persistently. The token is generated once on first backend startup and stored
-  server-side; CORS still restricts *which kinds* of origins can even attempt a request,
-  the token decides whether that request is honored.
+| | Fix | Why |
+|---|---|---|
+| 🛡️ | **The `basics` block (name/email/phone/URLs/profiles) is now covered by the no-fabrication guardrail** | Before this, a poisoned job description could make the tailoring model silently swap in a different email or LinkedIn URL, with zero violations flagged — and that resume is what gets typed into the real form. Fixed in `backend/app/services/guardrail.py`. |
+| 🔑 | **Every endpoint this extension calls requires an `X-SimplyApply-Token` header** | CORS alone can't tell this extension apart from any other one installed in your browser. Without the token, an unrelated extension with zero declared permissions on this API could read your resume, or rewrite `PUT /api/settings` to redirect all future LLM traffic (and a stored API key) to an attacker's server, persistently. |
 
-Both close real, verified exploit paths — not theoretical ones — found by testing against
-the actual code, not by inspection alone.
+---
 
-## Architecture (for hacking on this)
+## Requirements
 
-- `background.js` — the only file that calls `fetch()` against the backend.
-  Content scripts and the popup route all backend calls through it via
-  `browser.runtime.sendMessage`.
-- `content/common.js` — `setNativeValue()` (works around React/Ember
-  controlled-input value tracking), a `fillFields()` helper that tries a list
-  of candidate selectors per field, a file-input highlighter, and the
-  `runtime.onMessage` listener that dispatches an incoming `fillPage` message
-  to whichever ATS handler is loaded on the page.
-- `content/greenhouse.js`, `content/lever.js`, `content/workday.js` — each
-  attaches `window.SimplyApplyATS = { name, fill(data) }` with that
-  platform's field-selector map. Manifest `content_scripts` entries load
-  `common.js` before the matching ATS file per site, so there's no runtime
-  hostname sniffing needed.
-- `popup/popup.html` + `popup/popup.js` — looks up the current page, shows
-  either the "ready to fill" view or the ad-hoc job form, and sends the
-  `fillPage` message to the active tab on click. No framework, no build step.
-- `options/options.html` + `options/options.js` — one field for the backend
-  auth token, saved to `browser.storage.local`. `background.js` reads it from
-  there and attaches it as `X-SimplyApply-Token` on every backend request.
+- The SimplyApply backend running locally at `http://localhost:8000` — nothing in this
+  extension talks to any other host.
+- Firefox.

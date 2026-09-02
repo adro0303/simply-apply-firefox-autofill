@@ -1,29 +1,39 @@
 # SimplyApply — + Firefox autofill & cover letters
 
-> **This is a fork of [artbyjazi/simply-apply](https://github.com/artbyjazi/simply-apply)**,
-> licensed AGPL-3.0 same as upstream (see `LICENSE`). Everything in this section and in
-> `firefox-extension/` was added on top of that project; all credit for the original
-> search → tailor → guardrail → docx/pdf pipeline, and the no-fabrication design described
-> below, belongs to its author. Go star/use the upstream project too.
+<div align="center">
+
+[![Fork of artbyjazi/simply-apply](https://img.shields.io/badge/Fork_of-artbyjazi%2Fsimply--apply-181717.svg?style=for-the-badge&logo=github&logoColor=white)](https://github.com/artbyjazi/simply-apply)
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL--3.0-3DA639.svg?style=for-the-badge)](LICENSE)
+[![Firefox Extension](https://img.shields.io/badge/+_Firefox_Extension-FF7139.svg?style=for-the-badge&logo=firefoxbrowser&logoColor=white)](firefox-extension/README.md)
+
+🌍 **Extension docs:** [English](firefox-extension/README.md) · [Español](firefox-extension/README.es.md)
+
+</div>
+
+> All credit for the original search → tailor → guardrail → docx/pdf pipeline, and the
+> no-fabrication design described below, belongs to
+> **[artbyjazi/simply-apply](https://github.com/artbyjazi/simply-apply)** — go star/use the
+> upstream project too. This fork stays AGPL-3.0, same as upstream (see `LICENSE`).
 >
-> **What this fork adds:**
-> - `POST /api/apply/{job_id}/cover-letter` — guardrailed cover-letter generation,
->   same fail-closed design as resume tailoring.
+> **What this fork adds** — full details, install steps, and a security writeup in
+> [`firefox-extension/README.md`](firefox-extension/README.md):
+> - `POST /api/apply/{job_id}/cover-letter` — guardrailed cover-letter generation, same
+>   fail-closed design as resume tailoring.
 > - `POST /api/jobs/adhoc` + `GET /api/applications/by-url` — lets a browser extension
->   ingest a job found outside SimplyApply's own search (e.g. a Greenhouse/Lever/Workday
->   page LinkedIn or Indeed redirected you to) and look up what's already been prepared
->   for the page you're on.
+>   ingest a job found outside SimplyApply's own search (a Greenhouse/Lever/Workday page
+>   LinkedIn or Indeed redirected you to) and look up what's already prepared for the page
+>   you're on.
 > - `firefox-extension/` — a Manifest V3 Firefox WebExtension that autofills those ATS
->   pages using only this backend and your local LLM (Ollama/LM Studio/etc.) — no paid
->   API, no subscription. See `firefox-extension/README.md` for install + usage.
+>   pages using only this backend and your local LLM (Ollama/LM Studio/etc.) — no paid API,
+>   no subscription.
 > - An `X-SimplyApply-Token` auth requirement on every extension-facing endpoint, and a
 >   guardrail fix so `basics` (name/email/phone/URLs) is checked for fabrication the same
 >   way work/education/skills already were — both added after a security review found the
 >   originals let a rogue browser extension or a poisoned job posting silently rewrite
->   contact info or backend LLM settings. See `firefox-extension/README.md#security`.
+>   contact info or backend LLM settings.
 >
 > Selectors in `firefox-extension/content/*.js` were written without live browser access
-> and are explicitly marked unverified — see that README before relying on them.
+> and are explicitly marked unverified — see the extension README before relying on them.
 
 **Free, open-source, self-hosted job search + truthful resume tailoring.**
 
