@@ -10,6 +10,18 @@
 
 </div>
 
+**Free, open-source, self-hosted job search + truthful resume tailoring.**
+
+Search real job postings, click Apply on one, and get an ATS-safe resume regenerated from
+your structured data and tailored to that posting — with a mechanical guarantee that
+nothing was invented.
+
+```
+search  →  pick a posting  →  tailor()  →  no-fabrication check  →  docx + PDF  →  apply link
+```
+
+Your resume, your API keys, and your application history never leave your machine.
+
 > All credit for the original search → tailor → guardrail → docx/pdf pipeline, and the
 > no-fabrication design described below, belongs to
 > **[artbyjazi/simply-apply](https://github.com/artbyjazi/simply-apply)** — go star/use the
@@ -34,18 +46,6 @@
 >
 > Selectors in `firefox-extension/content/*.js` were written without live browser access
 > and are explicitly marked unverified — see the extension README before relying on them.
-
-**Free, open-source, self-hosted job search + truthful resume tailoring.**
-
-Search real job postings, click Apply on one, and get an ATS-safe resume regenerated from
-your structured data and tailored to that posting — with a mechanical guarantee that
-nothing was invented.
-
-```
-search  →  pick a posting  →  tailor()  →  no-fabrication check  →  docx + PDF  →  apply link
-```
-
-Your resume, your API keys, and your application history never leave your machine.
 
 ---
 
