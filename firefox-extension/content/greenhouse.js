@@ -32,7 +32,7 @@
         setNativeValue(el, data.coverLetter);
         filled.push("coverLetter");
       } else {
-        missed.push("coverLetter");
+        missed.push({ name: "coverLetter", value: data.coverLetter });
       }
     }
 

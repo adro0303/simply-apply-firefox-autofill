@@ -30,7 +30,12 @@
     // No standard cover-letter free-text field on Workday's Personal
     // Information page — cover letters there are typically a file upload on
     // a later page, which is out of scope (see file-level comment above).
-    if (data?.coverLetter) missed.push("coverLetter (no known field on this page — Workday cover letters are usually a later-page upload)");
+    if (data?.coverLetter) {
+      missed.push({
+        name: "coverLetter (no known field on this page — Workday cover letters are usually a later-page upload)",
+        value: data.coverLetter,
+      });
+    }
 
     highlightFileInputs(['[data-automation-id="file-upload-input-ref"]', 'input[type="file"]'], data?.resumeFilename);
 

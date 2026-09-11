@@ -49,15 +49,31 @@ function checkOk(resp, fallbackMessage) {
   throw new Error(resp.body?.detail || fallbackMessage);
 }
 
+// Inline token entry lives here (not just in Options) because some browsers
+// (e.g. Zen, a Firefox fork) fail to render standalone moz-extension:// option
+// pages — the popup panel is a separate rendering path that isn't affected.
 function showAuthSetupNeeded(container) {
   container.innerHTML = "";
   const div = document.createElement("div");
   div.className = "error";
-  div.textContent = "Set up your extension token in Options first. ";
+  div.textContent = "Extension token needed.";
+
+  const input = document.createElement("input");
+  input.type = "text";
+  input.placeholder = "Paste extension token";
+  input.style.marginTop = "6px";
+
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.textContent = "Open Options";
-  btn.addEventListener("click", () => browser.runtime.openOptionsPage());
+  btn.textContent = "Save token";
+  btn.addEventListener("click", async () => {
+    const token = input.value.trim();
+    if (!token) return;
+    await browser.storage.local.set({ apiToken: token });
+    init();
+  });
+
+  div.appendChild(input);
   div.appendChild(btn);
   container.appendChild(div);
 }
@@ -124,9 +140,43 @@ async function init() {
   }
 }
 
+// For each field the content script couldn't find on the page, show its
+// value with a Copy button so the user can paste it in by hand instead of
+// hunting back through the resume/tailored data themselves.
+function renderMissedFields(container, missed) {
+  for (const { name, value } of missed) {
+    const row = document.createElement("div");
+    row.className = "missed-field";
+
+    const label = document.createElement("span");
+    label.textContent = name;
+    row.appendChild(label);
+
+    if (value) {
+      const valueEl = document.createElement("code");
+      valueEl.textContent = value;
+      row.appendChild(valueEl);
+
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "copy-btn";
+      copyBtn.textContent = "Copy";
+      copyBtn.addEventListener("click", async () => {
+        await navigator.clipboard.writeText(value);
+        copyBtn.textContent = "Copied!";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      });
+      row.appendChild(copyBtn);
+    }
+
+    container.appendChild(row);
+  }
+}
+
 document.getElementById("fill-btn").addEventListener("click", async () => {
   const statusEl = document.getElementById("fill-status");
   statusEl.textContent = "";
+  statusEl.innerHTML = "";
   if (!fillPayload?.resume) {
     showError(statusEl, "No resume data to fill.");
     return;
@@ -138,7 +188,10 @@ document.getElementById("fill-btn").addEventListener("click", async () => {
       return;
     }
     const { filled, missed } = result.result;
-    statusEl.textContent = `Filled: ${filled.join(", ") || "none"}.` + (missed.length ? ` Not found on page: ${missed.join(", ")}.` : "");
+    const summary = document.createElement("p");
+    summary.textContent = `Filled: ${filled.join(", ") || "none"}.` + (missed.length ? " Not found on page — copy these in by hand:" : "");
+    statusEl.appendChild(summary);
+    renderMissedFields(statusEl, missed);
   } catch (err) {
     showError(statusEl, "Could not reach this tab's content script — reload the page and try again.");
   }

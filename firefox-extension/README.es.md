@@ -75,10 +75,13 @@ flowchart LR
 2. **Cargar la extensión.** Firefox → `about:debugging#/runtime/this-firefox` → **Load
    Temporary Add-on…** → selecciona `manifest.json` en esta carpeta. Sin texto rojo de
    error = bien. Es temporal — repite este paso tras reiniciar Firefox.
-3. **Configurar el token, una vez.** Icono de la extensión (bajo el icono de puzzle 🧩 si
-   no está fijado) → click derecho → **Administrar extensión** → **Preferencias**. Pega el
-   token que imprimió el backend al arrancar, guarda. Si te lo saltas, todo devuelve `401`
-   — el popup te lo recordará.
+3. **Configurar el token, una vez por sesión.** Icono de la extensión (bajo el icono de
+   puzzle 🧩 si no está fijado). Sin token todavía → el propio popup muestra un campo para
+   pegarlo directamente (no hace falta buscar la página de Options aparte — algunos forks
+   de Firefox fallan al renderizarla, ver
+   [Solución de problemas](#solución-de-problemas-forks-de-firefox-vía-flatpak-zen-browser-etc)
+   más abajo). Pega el token que imprimió el backend al arrancar, guarda. Si te lo saltas,
+   todo devuelve `401`.
 4. **Encuentra una oferta real.** Abre `http://localhost:3000`, busca, abre una oferta cuyo
    enlace de aplicar sea de Greenhouse (`boards.greenhouse.io/...` o
    `job-boards.greenhouse.io/...`) — empieza por ahí, es el más estándar de los tres ATS.
@@ -95,7 +98,58 @@ desarrollador (`F12`) sobre el campo que no se rellenó, compara sus atributos r
 corrígelo ahí.
 
 Cualquier aviso del guardrail (CV o carta genéricos en vez de personalizados) se muestra
-tal cual en el popup — nunca se oculta.
+tal cual en el popup — nunca se oculta. Cualquier campo que el content script no encontró
+en la página sale listado con su valor real y un botón **Copy**, para pegarlo a mano en
+vez de tener que rebuscar en tus datos de CV.
+
+---
+
+## Solución de problemas: forks de Firefox vía Flatpak (Zen Browser, etc.)
+
+Si "Load Temporary Add-on" en `about:debugging` muestra el icono de esta extensión roto,
+nunca aparece en ningún menú de extensiones/barra, o `options/options.html` se ve
+completamente en blanco — comprueba si tu navegador está instalado vía **Flatpak**. La
+pista está en el campo `Location` de la extensión en `about:debugging`: una ruta real se
+ve como `/home/tú/...`; una ruta como `/run/user/1000/doc/<hash>/` significa que el
+sandbox de Flatpak solo expuso el único archivo `manifest.json` que elegiste en el
+selector, no sus archivos hermanos (`icons/`, `popup/`, `options/`, `content/`) — todo lo
+que no sea un archivo de nivel superior referenciado directo en `manifest.json` (como
+`background.js`) falla al cargar en silencio.
+
+Dos soluciones, de menor a mayor esfuerzo:
+
+1. **Ampliar el sandbox** (puede no bastar por sí solo — el propio selector de archivos
+   puede seguir pasando por el portal aunque el permiso ya esté concedido):
+   ```
+   flatpak override --user --filesystem=/ruta/a/este/repo:ro <app-id-de-tu-navegador>
+   ```
+   Cierra del todo el navegador y vuelve a abrirlo — Flatpak solo aplica el override a
+   procesos nuevos.
+2. **Instalar una build sin Flatpak** (esto sí confirmado que funciona). Zen publica un
+   tarball oficial sin sandbox:
+   `https://github.com/zen-browser/desktop/releases/latest/download/zen.linux-x86_64.tar.xz`.
+   Descomprímelo donde quieras, migra tu perfil existente para no perder sesiones/
+   historial/marcadores (`cp -a ~/.var/app/<app-id-flatpak>/.zen/<tu-perfil> ~/.zen/`),
+   cierra del todo la versión Flatpak primero (el mismo perfil no puede estar abierto en
+   dos procesos a la vez), y lanza el binario extraído con
+   `--profile "~/.zen/<tu-perfil>"`.
+
+Aparte, y sin relación con Flatpak: **no se puede instalar esta extensión sin firmar de
+forma permanente** en Zen ni en ninguna build de Firefox de canal *release* — "Install
+Add-on From File" la rechaza con un error de verificación de firma, y tocar
+`xpinstall.signatures.required` en `about:config` no hace nada ahí (solo Firefox ESR/
+Developer Edition respetan ese ajuste). Cargarla como temporal vía `about:debugging` es la
+única opción, lo que significa recargarla — y perder el token de
+`browser.storage.local` — cada vez que el navegador se reinicia, porque Firefox
+desinstala las extensiones temporales al cerrar por diseño. Si volver a pegar el token
+cada sesión es más pesado que editar un archivo una vez, pégalo en la constante
+`DEFAULT_TOKEN` al principio de `background.js` — **solo en local, nunca subas un token
+real ahí** — y se autoconfigura al cargar en vez de pedírtelo.
+
+Fijar el icono en la barra también es inconsistente entre forks: el panel "Personalizar
+barra de herramientas" de Zen no lista iconos de extensiones en absoluto (a diferencia de
+Firefox normal); arrastrar el icono directo desde la lista de `about:addons` a la barra sí
+funcionó.
 
 ---
 

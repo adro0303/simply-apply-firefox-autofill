@@ -5,6 +5,16 @@
 
 const API_BASE = "http://localhost:8000";
 
+// Temporary add-ons lose all storage (including the token) every time the
+// browser restarts, since Firefox uninstalls them on shutdown by design.
+// Paste your own token below to re-seed it on load instead of retyping it
+// into the popup every session (see README: "Reinstalling every session").
+// Never commit a real token here — this file is version-controlled.
+const DEFAULT_TOKEN = "";
+browser.storage.local.get("apiToken").then(({ apiToken }) => {
+  if (!apiToken && DEFAULT_TOKEN) browser.storage.local.set({ apiToken: DEFAULT_TOKEN });
+});
+
 async function apiFetch(path, options = {}) {
   const { apiToken } = await browser.storage.local.get("apiToken");
   const headers = { ...(options.headers || {}), "X-SimplyApply-Token": apiToken || "" };

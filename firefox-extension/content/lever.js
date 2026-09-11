@@ -29,7 +29,7 @@
         setNativeValue(el, data.coverLetter);
         filled.push("coverLetter (Additional Information field)");
       } else {
-        missed.push("coverLetter");
+        missed.push({ name: "coverLetter", value: data.coverLetter });
       }
     }
 

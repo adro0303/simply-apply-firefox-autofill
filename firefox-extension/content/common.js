@@ -22,7 +22,8 @@ function setNativeValue(element, value) {
  * Fills a list of `{selectors, value}` fields. `selectors` is an array of CSS
  * selectors tried in order (best-guess fields may have several candidates
  * across ATS versions/tenants) — the first one found on the page wins.
- * Missing fields are skipped, never thrown on.
+ * Missing fields are skipped, never thrown on. `missed` carries the value
+ * along (not just the field name) so the popup can offer it for manual copy.
  */
 function fillFields(fields) {
   const filled = [];
@@ -32,7 +33,7 @@ function fillFields(fields) {
     const selector = Array.isArray(selectors) ? selectors : [selectors];
     const el = selector.map((s) => document.querySelector(s)).find(Boolean);
     if (!el) {
-      missed.push(name);
+      missed.push({ name, value });
       continue;
     }
     setNativeValue(el, value);

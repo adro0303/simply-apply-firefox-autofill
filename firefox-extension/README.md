@@ -75,10 +75,12 @@ flowchart LR
 2. **Load the extension.** Firefox → `about:debugging#/runtime/this-firefox` → **Load
    Temporary Add-on…** → select `manifest.json` in this folder. No red error text = good.
    It's temporary — reload it here again after restarting Firefox.
-3. **Set the token, once.** Click the extension icon (under the puzzle-piece icon 🧩 if
-   not pinned) → right-click → **Manage Extension** → **Preferences**. Paste the token the
-   backend printed at startup, save. Skip this and every request comes back `401` — the
-   popup will tell you to do this step.
+3. **Set the token, once per session.** Click the extension icon (under the puzzle-piece
+   icon 🧩 if not pinned). No token yet → the popup itself shows a field to paste it
+   directly (no need to find the separate Options page — some Firefox forks fail to
+   render it, see [Troubleshooting](#troubleshooting-flatpak-firefox-forks-zen-browser-etc)
+   below). Paste the token the backend printed at startup, save. Skip this and every
+   request comes back `401`.
 4. **Find a real posting.** Open `http://localhost:3000`, search, open a listing whose
    Apply link is Greenhouse-hosted (`boards.greenhouse.io/...` or
    `job-boards.greenhouse.io/...`) — start there, its markup is the most standard of the
@@ -95,7 +97,54 @@ that didn't fill, compare its real `id`/`name`/`data-*` attributes against the c
 in the matching `content/<ats>.js` file, and fix it there.
 
 Any guardrail warning from the backend (fell back to a generic resume/letter instead of a
-tailored one) is shown plainly in the popup — never hidden.
+tailored one) is shown plainly in the popup — never hidden. Any field the content script
+couldn't find on the page is listed with its actual value and a **Copy** button, so you
+can paste it in by hand instead of hunting back through your resume data.
+
+---
+
+## Troubleshooting: Flatpak Firefox forks (Zen Browser, etc.)
+
+If `about:debugging`'s "Load Temporary Add-on" shows a broken icon for this extension, it
+never shows up in any toolbar/extensions menu, or `options/options.html` renders
+completely blank — check whether your browser is installed via **Flatpak**. The tell is
+the extension's `Location` field in `about:debugging`: a real path looks like
+`/home/you/...`; a path like `/run/user/1000/doc/<hash>/` means Flatpak's sandbox only
+exposed the single `manifest.json` file you picked in the file dialog, not its sibling
+files (`icons/`, `popup/`, `options/`, `content/`) — anything not referenced as a
+top-level file directly by `manifest.json` (like `background.js`) silently fails to load.
+
+Two fixes, in rising order of effort:
+
+1. **Widen the sandbox** (may not be enough on its own — the file *picker* itself can keep
+   routing through the portal regardless of granted permissions):
+   ```
+   flatpak override --user --filesystem=/path/to/this/repo:ro <your-browser-app-id>
+   ```
+   Fully quit and relaunch the browser afterwards — Flatpak only applies overrides to new
+   processes.
+2. **Install a non-Flatpak build instead** (confirmed to work). Zen ships an official
+   unsandboxed tarball:
+   `https://github.com/zen-browser/desktop/releases/latest/download/zen.linux-x86_64.tar.xz`.
+   Extract it anywhere, migrate your existing profile so you keep your logins/history/
+   bookmarks (`cp -a ~/.var/app/<flatpak-app-id>/.zen/<your-profile> ~/.zen/`), fully quit
+   the Flatpak version first (the same profile can't be open in two processes at once),
+   then launch the extracted binary with `--profile "~/.zen/<your-profile>"`.
+
+Separately, and unrelated to Flatpak: **you cannot permanently install this unsigned
+extension** on Zen or any Firefox *release*-channel build — "Install Add-on From File"
+rejects it with a signature-verification error, and toggling
+`xpinstall.signatures.required` in `about:config` does nothing there (only Firefox ESR/
+Developer Edition honor that pref). Temporary loading via `about:debugging` is the only
+option, which means re-loading it — and its `browser.storage.local` token — every time
+the browser restarts, since Firefox uninstalls temporary add-ons on shutdown by design.
+If retyping the token every session is more annoying than editing a file once, paste it
+into the `DEFAULT_TOKEN` constant at the top of `background.js` — **locally only, never
+commit a real token there** — and it auto-seeds storage on load instead of asking.
+
+Pinning the icon to the toolbar is also inconsistent across forks: Zen's own "Customize
+Toolbar" panel doesn't list extension icons at all (unlike stock Firefox); dragging the
+icon directly from `about:addons`'s extension list onto the toolbar worked instead.
 
 ---
 

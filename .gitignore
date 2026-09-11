@@ -24,6 +24,7 @@ artifacts/
 # local build/temp scratch (created during dev on this machine)
 .cache/
 .tmp/
+*.xpi
 
 .DS_Store
 Thumbs.db
