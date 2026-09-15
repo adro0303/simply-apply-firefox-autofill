@@ -57,8 +57,12 @@ class _Stub:
         resume = schema.model_validate(BASE_RESUME)
         resume.basics.summary = "Backend engineer specializing in Python and Redis."
         if self.fabricate:
-            resume.skills.append(
-                type(resume.skills[0])(name="Infra", keywords=["Kubernetes"])
+            # Skills are locked to a deterministic selection from the base resume before
+            # the guardrail ever runs (see tailor.py), so a fabricated skill can no longer
+            # reach it — fabricate an invented employer instead, which stays LLM-generated
+            # and guardrail-checked.
+            resume.work.append(
+                type(resume.work[0])(name="FakeCorp Inc", position="Engineer")
             )
         return resume
 
@@ -152,22 +156,26 @@ def test_apply_logs_the_application(client, monkeypatch) -> None:
     assert rows[0]["apply_url"] == JOB["apply_url"]
 
 
-def test_fabricating_model_falls_back_and_warns(client, monkeypatch, tmp_path) -> None:
-    """The whole point of the system: a bad model must not produce a bad resume."""
+def test_fabricating_model_is_repaired_not_shipped(client, monkeypatch, tmp_path) -> None:
+    """The whole point of the system: a bad model must not produce a bad resume — but an
+    invented work entry must not cost the honest, tailored summary either. An employer
+    with no match in the base resume is now silently dropped during enforcement, before
+    the guardrail even runs (see `tailor._enforce_work_facts`) — a stronger guarantee than
+    catch-and-repair, so this never even surfaces as a violation."""
     _seed(client, monkeypatch, fabricate=True)
 
     body = client.post(f"/api/apply/{JOB['id']}").json()
 
-    assert body["tailoring"]["fell_back"] is True
-    assert body["tailoring"]["warning"]
-    assert any(v["value"] == "Kubernetes" for v in body["tailoring"]["violations"])
+    assert body["tailoring"]["fell_back"] is False
+    assert body["tailoring"]["changed"] is True
 
-    # And the rendered file must be the honest one — no Kubernetes in the DOCX.
-    out = tmp_path / "fallback.docx"
+    # The rendered file must be the honest one — no fabricated employer in the DOCX —
+    # but the real, tailored summary must still be there.
+    out = tmp_path / "repaired.docx"
     out.write_bytes(client.get(body["docx_url"]).content)
     text = "\n".join(p.text for p in docx.Document(str(out)).paragraphs)
-    assert "Kubernetes" not in text
-    assert "Python" in text
+    assert "FakeCorp" not in text
+    assert "Backend engineer specializing in Python and Redis." in text
 
 
 def test_apply_produces_a_single_page_pdf(client, monkeypatch, tmp_path) -> None:

@@ -6,9 +6,15 @@ something in the user's base resume. Anything that doesn't is a violation.
 
 What we check, and why each one:
 
-  employer / title / institution
+  employer / institution
       The facts a recruiter verifies first, and the ones that get someone rescinded.
       Must match a base-resume value exactly (after normalization).
+
+  job title
+      NOT whitelisted, by design. Reframing the same real job's title/focus for the
+      target role (e.g. leading with "Frontend" when the base title is "Software
+      Engineer", if the person genuinely did that work) is legitimate tailoring — the
+      employer and dates anchor it to a real job either way.
 
   dates
       Stretching an end date to close a gap is the most tempting single edit and the
@@ -52,13 +58,34 @@ from app.schemas import Basics, GuardrailViolation, StructuredResume
 _NUMERIC = re.compile(r"\$?\d[\d,]*(?:\.\d+)?\s*(?:%|[kKmMbB]\b|[xX]\b)?")
 _NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
-# Numbers that carry no factual claim on their own — years of a date, small counts that
-# appear incidentally ("2 of the 3 services"). Flagging these produces noise without
-# catching fabrication, because they're not the impressive-metric class we care about.
-_TRIVIAL_NUMBERS = {str(n) for n in range(0, 11)}
+# Named products/platforms found live: qwen3:8b's tailored `basics.label` claimed "Power
+# BI Analyst" for a job whose posting mentioned Power BI — the user has never touched it.
+# Unlike a domain/role word ("Frontend", "Specialist", "Engineer" — legitimate to lead
+# with if the underlying skills support it, see the `job title` section above), a named
+# tool is a specific, falsifiable claim exactly like an employer name, so it's checked the
+# same way: must appear somewhere in the base resume.
+#
+# This is a fixed list, not exhaustive — it won't catch every possible tool name, only the
+# common ones below. Extend it when a new one turns up in practice rather than trying to
+# enumerate every technology in existence.
+_KNOWN_TOOLS = {
+    "power bi", "power automate", "power query", "tableau", "excel", "sap", "salesforce",
+    "spring boot", "spring", "angular", "react", "vue", "django", "flask", "laravel",
+    "aws", "azure", "gcp", "kubernetes", "terraform", "jenkins", "ansible", "sql server",
+    "oracle", "mongodb", "redis", "kafka", "jira", "confluence", "figma", "photoshop",
+    "sketch", "unity", "unreal", "matlab", "sas", "spss", "hadoop", "spark", "snowflake",
+    "looker", "qlik", "dax", "thymeleaf", "jquery",
+}
 
+# Rank words checked against the SAME job's own real title — user decision, found live:
+# qwen3:8b promoted "AI & Software Engineer" to "Senior Software Engineer" unprompted.
+# Relative, not absolute: a rank word already in the real title (e.g. this base resume's
+# own "...promoted to Project Team Lead") is never flagged for that job.
+_SENIORITY_WORDS = {
+    "senior", "staff", "principal", "vp", "director", "lead", "head", "chief", "manager",
+}
 
-def _fold(value: str) -> str:
+def fold(value: str) -> str:
     """Lowercase, strip accents, collapse to alphanumerics.
 
     Makes "Société Générale" and "societe generale" compare equal, so a purely cosmetic
@@ -69,8 +96,37 @@ def _fold(value: str) -> str:
     return _NON_ALNUM.sub(" ", stripped.lower()).strip()
 
 
-def _key(value: str) -> str:
-    return _NON_ALNUM.sub("", _fold(value))
+def key(value: str) -> str:
+    return _NON_ALNUM.sub("", fold(value))
+
+
+def _tokens(value: str) -> set[str]:
+    return {t for t in fold(value).split() if len(t) > 2}
+
+
+def project_name_matches(candidate: str, base_names: list[str], min_overlap: float = 0.5) -> bool:
+    """Fuzzy project-identity check, unlike the exact-match whitelist used elsewhere.
+
+    A project name has no employer+dates anchor to confirm "same real thing, reworded"
+    the way a job title does, so full free-text isn't safe — but exact string matching is
+    too brittle: "OpenSSH Log Anomaly Detection" reworded to "OpenSSH Anomaly Detection
+    System" is the same real project, not an invention. Token-overlap against each base
+    project name is the middle ground: it tolerates reordering/rewording of a real name
+    while still rejecting a name that shares nothing with anything in the base resume.
+    """
+    cand_tokens = _tokens(candidate)
+    if not cand_tokens:
+        return False
+    for base_name in base_names:
+        base_tokens = _tokens(base_name)
+        if not base_tokens:
+            continue
+        shared = cand_tokens & base_tokens
+        if not shared:
+            continue
+        if len(shared) / min(len(cand_tokens), len(base_tokens)) >= min_overlap:
+            return True
+    return False
 
 
 def _normalize_number(token: str) -> str:
@@ -132,10 +188,18 @@ def _all_text(resume: StructuredResume) -> str:
 
 
 def _numbers_in(text: str) -> set[str]:
+    """Every number in `text`, normalized. No "trivial number" exemption on purpose — a
+    small digit is not automatically harmless: "8+ years of experience" reads as a
+    load-bearing claim exactly like "40% faster" does, and a fixed range (originally 0-10)
+    that excluded exactly that pattern let it through uncaught in practice. Per-field
+    repair (see tailor.py) keeps the cost of an incidental false positive ("3 teams") to
+    reverting just that one bullet, not the whole resume, so there's no longer a reason to
+    accept the false-negative risk in exchange for less noise.
+    """
     found = set()
     for match in _NUMERIC.finditer(text or ""):
         normalized = _normalize_number(match.group())
-        if normalized and normalized not in _TRIVIAL_NUMBERS:
+        if normalized:
             found.add(normalized)
     return found
 
@@ -144,27 +208,26 @@ class BaseFacts:
     """The set of things the tailored resume is allowed to assert."""
 
     def __init__(self, base: StructuredResume) -> None:
-        self.employers = {_key(j.name) for j in base.work if j.name}
-        self.titles = {_key(j.position) for j in base.work if j.position}
-        self.institutions = {_key(e.institution) for e in base.education if e.institution}
-        self.degrees = {_key(e.studyType) for e in base.education if e.studyType}
-        self.fields = {_key(e.area) for e in base.education if e.area}
-        self.project_names = {_key(p.name) for p in base.projects if p.name}
+        self.employers = {key(j.name) for j in base.work if j.name}
+        self.institutions = {key(e.institution) for e in base.education if e.institution}
+        self.degrees = {key(e.studyType) for e in base.education if e.studyType}
+        self.fields = {key(e.area) for e in base.education if e.area}
+        self.project_names = [p.name for p in base.projects if p.name]
 
         self.dates: set[str] = set()
         for job in base.work:
-            self.dates.update(_key(d) for d in (job.startDate, job.endDate) if d)
+            self.dates.update(key(d) for d in (job.startDate, job.endDate) if d)
         for edu in base.education:
-            self.dates.update(_key(d) for d in (edu.startDate, edu.endDate) if d)
+            self.dates.update(key(d) for d in (edu.startDate, edu.endDate) if d)
         for project in base.projects:
-            self.dates.update(_key(d) for d in (project.startDate, project.endDate) if d)
+            self.dates.update(key(d) for d in (project.startDate, project.endDate) if d)
 
-        self.corpus = _fold(_all_text(base))
+        self.corpus = fold(_all_text(base))
         self.numbers = _numbers_in(_all_text(base))
 
     def mentions(self, value: str) -> bool:
         """True if `value` appears anywhere in the base resume's text."""
-        folded = _fold(value)
+        folded = fold(value)
         return bool(folded) and folded in self.corpus
 
 
@@ -184,18 +247,18 @@ def _contact_diff(base: Basics, tailored: Basics) -> list[tuple[str, str, str]]:
     for field in _CONTACT_FIELDS:
         base_value = getattr(base, field)
         tailored_value = getattr(tailored, field)
-        norm = _fold_url if field == "url" else (_fold_phone if field == "phone" else _key)
+        norm = _fold_url if field == "url" else (_fold_phone if field == "phone" else key)
         if norm(base_value) != norm(tailored_value):
             changed.append((field, base_value, tailored_value))
 
     for field in _LOCATION_FIELDS:
         base_value = getattr(base.location, field)
         tailored_value = getattr(tailored.location, field)
-        if _key(base_value) != _key(tailored_value):
+        if key(base_value) != key(tailored_value):
             changed.append((f"location.{field}", base_value, tailored_value))
 
     for i, (bp, tp) in enumerate(zip_longest(base.profiles, tailored.profiles)):
-        for field, norm in (("network", _key), ("username", _key), ("url", _fold_url)):
+        for field, norm in (("network", key), ("username", key), ("url", _fold_url)):
             base_value = getattr(bp, field) if bp else ""
             tailored_value = getattr(tp, field) if tp else ""
             if norm(base_value) != norm(tailored_value):
@@ -214,6 +277,30 @@ def check(base: StructuredResume, tailored: StructuredResume) -> list[GuardrailV
             GuardrailViolation(kind=kind, value=value, where=where, detail=detail)
         )
 
+    def flag_numbers(text: str, where: str) -> None:
+        for number in sorted(_numbers_in(text) - facts.numbers):
+            flag(
+                "metric",
+                number,
+                where,
+                "Figure does not appear in the base resume — possible inflated or invented metric.",
+            )
+
+    def flag_tools(text: str, where: str) -> None:
+        text_key = fold(text)
+        for tool in sorted(_KNOWN_TOOLS):
+            if tool in text_key and tool not in facts.corpus:
+                flag(
+                    "skill",
+                    tool,
+                    where,
+                    "Names a tool/platform that doesn't appear anywhere in the base resume.",
+                )
+
+    def flag_free_text(text: str, where: str) -> None:
+        flag_numbers(text, where)
+        flag_tools(text, where)
+
     # --- contact info ------------------------------------------------------
     # Tailoring has no legitimate reason to touch any of this — unlike the summary, which
     # is meant to change, a rewritten email/phone/url/name/location/profile is either a
@@ -229,34 +316,70 @@ def check(base: StructuredResume, tailored: StructuredResume) -> list[GuardrailV
         )
 
     # --- experience ------------------------------------------------------
+    # Job title CAN be reworded, unlike employer/dates — honestly reframing the same real
+    # job (e.g. leading with "Frontend" when the base title is "Software Engineer", if
+    # that job's own highlights show real frontend work) is legitimate tailoring, not
+    # fabrication — user decision, see tailor.py SYSTEM_PROMPT. But the reword must be
+    # grounded in THAT SAME job's own real content, checked two ways below: a named tool
+    # ("Power BI Analyst") is checked the same as basics.label; the title as a whole must
+    # share at least one real word with that job's own position/summary/highlights (found
+    # live: qwen3:8b once retitled a sales role "Software Engineer" — a different function,
+    # not a rewording of the real one), and any seniority word must already be true for
+    # that job (found live: "AI & Software Engineer" promoted unprompted to "Senior
+    # Software Engineer").
     for i, job in enumerate(tailored.work):
         where = f"work[{i}]"
-        if job.name and _key(job.name) not in facts.employers:
+        if key(job.name) not in facts.employers:
+            # No `job.name and` guard here on purpose: a work entry with content
+            # (position/highlights) but no employer name is not "omitted", it's
+            # unverifiable — there's nothing to match it to.
             flag("employer", job.name, where, "Employer is not in the base resume.")
-        if job.position and _key(job.position) not in facts.titles:
-            flag("title", job.position, where, "Job title is not in the base resume.")
         for field in ("startDate", "endDate"):
             value = getattr(job, field)
-            if value and _key(value) not in facts.dates:
+            if value and key(value) not in facts.dates:
                 flag("date", value, f"{where}.{field}", "Date is not in the base resume.")
+        flag_tools(job.position, f"{where}.position")
+
+        base_job = next((b for b in base.work if b.name and key(b.name) == key(job.name)), None)
+        if base_job is not None and job.position:
+            base_job_tokens = _tokens(base_job.position) | _tokens(base_job.summary)
+            for highlight in base_job.highlights:
+                base_job_tokens |= _tokens(highlight)
+            pos_tokens = _tokens(job.position)
+            if pos_tokens and not (pos_tokens & base_job_tokens):
+                flag(
+                    "title",
+                    job.position,
+                    f"{where}.position",
+                    "Title claims a function/focus with no basis anywhere in this job's real duties.",
+                )
+            claimed_rank = (pos_tokens & _SENIORITY_WORDS) - _tokens(base_job.position)
+            if claimed_rank:
+                flag(
+                    "title",
+                    job.position,
+                    f"{where}.position",
+                    f"Title claims a seniority ({', '.join(sorted(claimed_rank))}) this job's real title doesn't have.",
+                )
 
     # --- education -------------------------------------------------------
     for i, edu in enumerate(tailored.education):
         where = f"education[{i}]"
-        if edu.institution and _key(edu.institution) not in facts.institutions:
+        if edu.institution and key(edu.institution) not in facts.institutions:
             flag("institution", edu.institution, where, "Institution is not in the base resume.")
-        if edu.studyType and _key(edu.studyType) not in facts.degrees:
+        if edu.studyType and key(edu.studyType) not in facts.degrees:
             flag("degree", edu.studyType, where, "Degree is not in the base resume.")
-        if edu.area and _key(edu.area) not in facts.fields:
+        if edu.area and key(edu.area) not in facts.fields:
             flag("field", edu.area, where, "Field of study is not in the base resume.")
         for field in ("startDate", "endDate"):
             value = getattr(edu, field)
-            if value and _key(value) not in facts.dates:
+            if value and key(value) not in facts.dates:
                 flag("date", value, f"{where}.{field}", "Date is not in the base resume.")
 
     # --- projects --------------------------------------------------------
     for i, project in enumerate(tailored.projects):
-        if project.name and _key(project.name) not in facts.project_names:
+        if not project_name_matches(project.name, facts.project_names):
+            # No `project.name and` guard, same reasoning as the employer check above.
             flag("project", project.name, f"projects[{i}]", "Project is not in the base resume.")
 
     # --- skills ----------------------------------------------------------
@@ -279,16 +402,22 @@ def check(base: StructuredResume, tailored: StructuredResume) -> list[GuardrailV
                     "Keyword does not appear anywhere in the base resume.",
                 )
 
-    # --- metrics ---------------------------------------------------------
-    # Checked last and across the whole document, because an inflated number can appear
-    # in a rewritten bullet whose surrounding words are all legitimate.
-    for number in sorted(_numbers_in(_all_text(tailored)) - facts.numbers):
-        flag(
-            "metric",
-            number,
-            "document",
-            "Figure does not appear in the base resume — possible inflated or invented metric.",
-        )
+    # --- metrics & tool names ---------------------------------------------
+    # Checked per free-text field, not across the whole document: an inflated number or
+    # an invented tool name can appear in a rewritten bullet whose surrounding words are
+    # all legitimate, and a specific `where` lets tailor.py repair just that field instead
+    # of discarding everything the model got right.
+    flag_free_text(tailored.basics.summary, "basics.summary")
+    flag_free_text(tailored.basics.label, "basics.label")
+    for i, job in enumerate(tailored.work):
+        flag_free_text(job.summary, f"work[{i}].summary")
+        for j, highlight in enumerate(job.highlights):
+            flag_free_text(highlight, f"work[{i}].highlights[{j}]")
+    for i, project in enumerate(tailored.projects):
+        flag_free_text(project.name, f"projects[{i}].name")
+        flag_free_text(project.description, f"projects[{i}].description")
+        for j, highlight in enumerate(project.highlights):
+            flag_free_text(highlight, f"projects[{i}].highlights[{j}]")
 
     return violations
 

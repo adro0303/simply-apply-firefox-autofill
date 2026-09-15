@@ -109,11 +109,49 @@ def test_invented_employer_is_caught(base: StructuredResume) -> None:
     assert "employer" in _kinds(guardrail.check(base, tailored))
 
 
-def test_promoted_job_title_is_caught(base: StructuredResume) -> None:
-    """The subtlest fabrication: same employer, same dates, inflated title."""
+def test_reworded_job_title_is_allowed(base: StructuredResume) -> None:
+    """Job title is a deliberate exception to the whitelist for employer/dates: honestly
+    reframing the same real job (same employer, same dates) for the target role is
+    legitimate tailoring, not fabrication — user decision. The reword still has to share
+    real ground with that job (here, "Engineer" — same domain, no seniority claimed), see
+    `test_retitling_into_an_unrelated_function_is_caught` and
+    `test_unearned_seniority_in_a_reworded_title_is_caught` for what isn't allowed."""
     tailored = base.model_copy(deep=True)
-    tailored.work[0].position = "Senior Staff Software Engineer"
-    assert "title" in _kinds(guardrail.check(base, tailored))
+    tailored.work[0].position = "Frontend Engineer"
+    assert "title" not in _kinds(guardrail.check(base, tailored))
+
+
+def test_retitling_into_an_unrelated_function_is_caught(base: StructuredResume) -> None:
+    """Real bug found live: qwen3:8b retitled an "Insurance Sales Representative" role
+    "Software Engineer" — not a rewording of the real function, a different one, with
+    nothing in that job's own content to support it."""
+    tailored = base.model_copy(deep=True)
+    tailored.work[0].position = "Data Scientist"  # shares nothing with "Software Engineer"
+    # or with latency/Redis/Flask/FastAPI highlights — same job title case, different
+    # domain entirely, deliberately not overlapping "Engineer"
+    violations = guardrail.check(base, tailored)
+    assert any(v.kind == "title" and v.where == "work[0].position" for v in violations)
+
+
+def test_unearned_seniority_in_a_reworded_title_is_caught(base: StructuredResume) -> None:
+    """Real bug found live: qwen3:8b promoted "AI & Software Engineer" to "Senior Software
+    Engineer" unprompted — the base resume never calls this job "Senior"."""
+    tailored = base.model_copy(deep=True)
+    tailored.work[0].position = "Senior Software Engineer"
+    violations = guardrail.check(base, tailored)
+    assert any(v.kind == "title" and v.where == "work[0].position" for v in violations)
+
+
+def test_seniority_already_true_for_that_job_is_not_flagged(base: StructuredResume) -> None:
+    """The seniority check is relative to THAT job's own real title, not a blanket ban —
+    if the base resume already says "Lead" for this job, reusing it isn't a claim of
+    anything new."""
+    based_on_lead = base.model_copy(deep=True)
+    based_on_lead.work[0].position = "Software Engineer, Team Lead"
+    tailored = based_on_lead.model_copy(deep=True)
+    tailored.work[0].position = "Lead Engineer"
+    violations = guardrail.check(based_on_lead, tailored)
+    assert not any(v.kind == "title" for v in violations)
 
 
 def test_stretched_end_date_is_caught(base: StructuredResume) -> None:
@@ -220,13 +258,21 @@ def test_invented_project_is_caught(base: StructuredResume) -> None:
     assert "project" in _kinds(guardrail.check(base, tailored))
 
 
+def test_reworded_project_name_is_not_flagged(base: StructuredResume) -> None:
+    """Fuzzy project-identity match: base has "Ledger" — a rewording that shares enough
+    tokens with a real project must pass, unlike a fully unrelated invented name."""
+    tailored = base.model_copy(deep=True)
+    tailored.projects[0].name = "Ledger — Double-Entry Bookkeeping App"
+    assert "project" not in _kinds(guardrail.check(base, tailored))
+
+
 def test_multiple_fabrications_all_reported(base: StructuredResume) -> None:
     """The retry prompt needs every violation, not just the first."""
     tailored = base.model_copy(deep=True)
-    tailored.work[0].position = "Principal Engineer"
+    tailored.work[0].name = "Not The Real Employer"
     tailored.work[0].endDate = "2025-12"
     tailored.skills.append(Skill(name="Cloud", keywords=["Terraform"]))
-    assert {"title", "date", "skill"} <= _kinds(guardrail.check(base, tailored))
+    assert {"employer", "date", "skill"} <= _kinds(guardrail.check(base, tailored))
 
 
 # --- normalization edge cases -------------------------------------------------
@@ -241,18 +287,63 @@ def test_equivalent_number_formats_do_not_false_positive(base: StructuredResume)
     assert "metric" not in _kinds(guardrail.check(base, tailored))
 
 
-def test_small_incidental_numbers_are_not_flagged(base: StructuredResume) -> None:
-    """Flagging "3" in "3 teams" would bury real violations in noise."""
+def test_small_incidental_numbers_are_flagged_too(base: StructuredResume) -> None:
+    """No "trivial number" exemption, on purpose (see guardrail._numbers_in) — a small
+    digit isn't automatically harmless. Previously 0-10 was exempted to cut noise on
+    incidental counts like "3 teams", but that same exemption is exactly what let a real
+    fabrication ("8+ years of experience", found live against qwen3:8b) through uncaught.
+    Per-field repair means the cost of the occasional incidental false positive is just
+    reverting one bullet, not the whole resume — worth it for catching the real case."""
     tailored = base.model_copy(deep=True)
     tailored.work[0].highlights.append("Partnered with 3 teams on the rollout.")
-    assert "metric" not in _kinds(guardrail.check(base, tailored))
+    assert "metric" in _kinds(guardrail.check(base, tailored))
+
+
+def test_fabricated_years_of_experience_is_caught(base: StructuredResume) -> None:
+    """The exact real-world failure this module exists to catch: a small number used to
+    assert a seniority/experience claim the base resume never supports."""
+    tailored = base.model_copy(deep=True)
+    tailored.basics.summary = "Experienced engineer with 8+ years building scalable systems."
+    violations = guardrail.check(base, tailored)
+    assert any(v.kind == "metric" and v.where == "basics.summary" for v in violations)
+
+
+def test_fabricated_tool_in_headline_is_caught(base: StructuredResume) -> None:
+    """Real bug found live: qwen3:8b's tailored `basics.label` claimed "Power BI Analyst"
+    for a job that mentioned Power BI — the base resume never mentions it anywhere. Only
+    numbers were checked in free text before this; named tools weren't checked at all."""
+    tailored = base.model_copy(deep=True)
+    tailored.basics.label = "Data & Power BI Analyst"
+    violations = guardrail.check(base, tailored)
+    assert any(v.kind == "skill" and v.where == "basics.label" and v.value == "power bi" for v in violations)
+
+
+def test_known_tool_already_in_base_resume_is_not_flagged(base: StructuredResume) -> None:
+    """The check is against the base resume's own text, not a blanket ban — a tool the
+    user genuinely has is never a violation just for being on the known-tools list."""
+    tailored = base.model_copy(deep=True)
+    tailored.basics.summary += " Comfortable with Docker for local development."
+    base_with_docker = base.model_copy(deep=True)
+    base_with_docker.work[0].highlights.append("Used Docker in CI.")
+    violations = guardrail.check(base_with_docker, tailored)
+    assert not any(v.kind == "skill" and v.value == "docker" for v in violations)
+
+
+def test_metric_violation_is_attributed_to_its_field(base: StructuredResume) -> None:
+    """`where` must point at the exact field, not "document" — tailor.py's partial
+    repair needs to know which section to revert without discarding the whole resume."""
+    tailored = base.model_copy(deep=True)
+    tailored.work[0].highlights.append("Cut latency by 99%.")
+    violations = guardrail.check(base, tailored)
+    metric = next(v for v in violations if v.kind == "metric")
+    assert metric.where == f"work[0].highlights[{len(tailored.work[0].highlights) - 1}]"
 
 
 def test_summarize_lists_violations(base: StructuredResume) -> None:
     tailored = base.model_copy(deep=True)
-    tailored.work[0].position = "VP of Engineering"
+    tailored.work[0].name = "Definitely Not Acme Corp"
     text = guardrail.summarize(guardrail.check(base, tailored))
-    assert "VP of Engineering" in text
+    assert "Definitely Not Acme Corp" in text
 
 
 # --- check_text (free-prose cover letters) ------------------------------------
@@ -273,9 +364,12 @@ def test_check_text_catches_fabricated_metric(base: StructuredResume) -> None:
     assert any(v.value == "60%" for v in violations)
 
 
-def test_check_text_ignores_small_incidental_numbers(base: StructuredResume) -> None:
+def test_check_text_flags_small_incidental_numbers_too(base: StructuredResume) -> None:
+    """No trivial-number exemption here either, same reasoning as `check()` — a cover
+    letter's "3 engineers" is exactly as capable of being a fabricated headcount as any
+    other number, e.g. a fabricated "8 years of experience" claim."""
     text = "I led a team of 3 engineers."
-    assert guardrail.check_text(base, text) == []
+    assert guardrail.check_text(base, text) != []
 
 
 def test_check_text_does_not_flag_false_employer_claims(base: StructuredResume) -> None:

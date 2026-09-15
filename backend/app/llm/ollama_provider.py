@@ -23,7 +23,10 @@ T = TypeVar("T", bound=BaseModel)
 
 DEFAULT_MODEL = "qwen2.5:7b"
 # Local models are slow — a 7B model tailoring against a long JD can take minutes on CPU.
-TIMEOUT = httpx.Timeout(600.0, connect=10.0)
+# A 14B model with partial GPU offload (VRAM too small to hold it entirely) occasionally
+# exceeded the previous 600s on a real job description and failed with an unhelpful empty
+# error instead of a slow-but-successful response — found live, not guessed.
+TIMEOUT = httpx.Timeout(1200.0, connect=10.0)
 
 
 class OllamaProvider(LLMProvider):
