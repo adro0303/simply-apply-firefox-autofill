@@ -2,7 +2,7 @@
 
 # 🦊 SimplyApply Autofill
 
-### Fills real Greenhouse/Lever/Workday application forms using a local LLM — no subscription, no cloud API
+### Fills real Greenhouse/Lever/Workday/Teamtailor application forms using a local LLM — no subscription, no cloud API
 
 🌍 **Language:** English · [Español](README.es.md)
 
@@ -26,7 +26,7 @@ actually matters — a **guardrail that mechanically rejects fabricated facts**,
 local model's mistakes fail closed instead of quietly ending up on a real application.
 
 This extension is the last mile: it takes what SimplyApply already generates and types it
-into the actual page, on Greenhouse, Lever, or Workday, wherever a job portal redirected
+into the actual page, on Greenhouse, Lever, Workday, or Teamtailor, wherever a job portal redirected
 you. **It never clicks Submit** — you review and send the form yourself.
 
 ---
@@ -35,7 +35,7 @@ you. **It never clicks Submit** — you review and send the form yourself.
 
 ```mermaid
 flowchart LR
-    A["👤 You open a job page\nGreenhouse / Lever / Workday"] --> B["🧩 Extension popup\nlooks up this URL"]
+    A["👤 You open a job page\nGreenhouse / Lever / Workday / Teamtailor"] --> B["🧩 Extension popup\nlooks up this URL"]
     B -->|known job| C["📄 Already tailored\nresume + cover letter"]
     B -->|unknown job| D["📝 Paste job description"]
     D --> E["🧠 Local LLM (Ollama)\ntailor + guardrail"]
@@ -58,7 +58,7 @@ flowchart LR
 - **`content/common.js`** — `setNativeValue()` (works around React/Ember swallowing a
   plain `.value =` assignment), a `fillFields()` helper that tries a list of candidate
   selectors per field, and a file-input highlighter.
-- **`content/greenhouse.js` / `lever.js` / `workday.js`** — one field-selector map per
+- **`content/greenhouse.js` / `lever.js` / `workday.js` / `teamtailor.js`** — one field-selector map per
   platform, each exposing `window.SimplyApplyATS = { name, fill(data) }`. The manifest
   loads `common.js` before the matching ATS file per site, so there's no runtime hostname
   sniffing.
@@ -153,9 +153,10 @@ icon directly from `about:addons`'s extension list onto the toolbar worked inste
 | | Limitation | What it means |
 |---|---|---|
 | 📎 | **File upload isn't automated** | Browsers block scripts from assigning a file to `<input type="file">`. The extension outlines the field and shows the resume's filename instead — you attach it from Downloads yourself. |
-| 🎯 | **Selectors are unverified against a live posting** | Built without browser access to a real Greenhouse/Lever/Workday page. Every `content/*.js` file starts with a `SELECTORS UNVERIFIED` comment — expect to tweak them, especially for Greenhouse (legacy `boards.greenhouse.io` embed vs. newer `job-boards.greenhouse.io` React app use different markup). |
+| 🎯 | **Greenhouse/Lever/Workday selectors are unverified against a live posting** | Built without browser access to a real page. Those three `content/*.js` files start with a `SELECTORS UNVERIFIED` comment — expect to tweak them, especially for Greenhouse (legacy `boards.greenhouse.io` embed vs. newer `job-boards.greenhouse.io` React app use different markup). `content/teamtailor.js` was checked against a live posting and is not in this category. |
 | 🧩 | **Workday coverage is partial, on purpose** | Workday is a heavily customized per-tenant SPA — field names, page order, and `data-automation-id` values vary per employer, across a multi-page wizard. Only the first "Personal Information" page is attempted; later Experience/Education pages (dynamic "add another" lists) are filled by hand. |
 | ✉️ | **Cover-letter field detection is best-effort** | Greenhouse: a "cover letter" textarea when the posting offers one. Lever: the "Additional Information" `comments` field, since most Lever postings have no dedicated cover-letter field. Workday's Personal Information page has none at all — paste it wherever that tenant's later pages expect it. |
+| 🔗 | **Teamtailor has no portfolio/LinkedIn text field** | LinkedIn is only fillable via Teamtailor's own "Connect with LinkedIn" OAuth button — there's no URL field to type into, so the extension doesn't attempt it. Resume upload is a Dropzone.js widget, not a plain file input, so the extension highlights the drop-zone instead of a file input. |
 
 ## Security
 

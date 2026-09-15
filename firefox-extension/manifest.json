@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "SimplyApply Autofill",
   "version": "0.1.0",
-  "description": "Fills personal-info fields and drops a tailored cover letter on Greenhouse/Lever/Workday application pages, using a locally-run SimplyApply backend. Never submits the form.",
+  "description": "Fills personal-info fields and drops a tailored cover letter on Greenhouse/Lever/Workday/Teamtailor application pages, using a locally-run SimplyApply backend. Never submits the form.",
   "browser_specific_settings": {
     "gecko": {
       "id": "simplyapply-autofill@local"
@@ -14,7 +14,8 @@
     "*://boards.greenhouse.io/*",
     "*://job-boards.greenhouse.io/*",
     "*://jobs.lever.co/*",
-    "*://*.myworkdayjobs.com/*"
+    "*://*.myworkdayjobs.com/*",
+    "*://*.teamtailor.com/*"
   ],
   "background": {
     "scripts": ["background.js"]
@@ -50,6 +51,11 @@
     {
       "matches": ["*://*.myworkdayjobs.com/*"],
       "js": ["content/common.js", "content/workday.js"],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.teamtailor.com/*"],
+      "js": ["content/common.js", "content/teamtailor.js"],
       "run_at": "document_idle"
     }
   ]
